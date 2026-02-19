@@ -41,7 +41,7 @@ changelog:
 
 brews:
   - repository:
-      owner: LarsenClose
+      owner: disentangle-network
       name: homebrew-tap
     homepage: https://github.com/disentangle-network/launch
     description: Deployment orchestrator for the Disentangle Network
