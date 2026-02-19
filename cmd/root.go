@@ -19,15 +19,20 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "launch",
 	Short: "Deployment orchestrator for the Disentangle Network",
-	Long: `launch orchestrates the full deployment pipeline for the Disentangle Network,
-from OCI resource discovery through cluster provisioning, secrets bootstrapping,
-and node deployment.
+	Long: `launch manages Disentangle Network deployments across any Kubernetes cluster.
 
-Pipeline stages:
-  1. discover  - OCI resource discovery (oci-tf-bootstrap)
-  2. infra     - Provision OKE cluster (k8s-oci-foundation)
-  3. secrets   - Bootstrap secrets (genesis-operator)
-  4. deploy    - Deploy nodes (FluxCD/Helm)`,
+Fleet management:
+  init           Scaffold a fleet monorepo
+  cluster add    Add a cluster to the fleet
+  secrets init   Bootstrap secrets for a cluster
+  bootstrap      FluxCD bootstrap + genesis unseal
+  mesh           Nebula-PQ overlay mesh management
+  status         Health check across clusters
+
+Legacy pipeline (OCI-specific):
+  discover       OCI resource discovery
+  infra          Provision OKE cluster
+  deploy         Deploy via FluxCD`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	Version:       fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, buildDate),

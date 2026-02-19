@@ -1,0 +1,20 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: disentangle
+  namespace: disentangle
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: disentangle
+      version: ">=0.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: disentangle
+        namespace: disentangle
+  values:
+    nodes:
+      count: 3
+    persistence:
+      enabled: true

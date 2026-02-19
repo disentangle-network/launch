@@ -1,0 +1,15 @@
+# Decrypted secrets (never commit)
+*.dec
+*.decrypted
+*.cleartext
+
+# Age private keys
+*.age.key
+age.key
+
+# Nebula CA private key (never in git)
+nebula-ca.key
+
+# OS files
+.DS_Store
+Thumbs.db
