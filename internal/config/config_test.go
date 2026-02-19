@@ -95,15 +95,8 @@ func TestLoadNonExistentFileReturnsError(t *testing.T) {
 }
 
 func TestLoadNoFileReturnsEmptyConfig(t *testing.T) {
-	// Use a temp dir as working directory so no .launch.yaml is found.
-	// We pass an empty string so Load falls through to default paths.
-	// Since we cannot easily control HOME or cwd in a unit test without
-	// side effects, we rely on the fact that there is no .launch.yaml
-	// in whatever cwd the test runner uses, and the default config path
-	// may or may not exist. If the default config file does not exist,
-	// we get an empty Config.
-	//
-	// For a deterministic test, change cwd to a temp dir.
+	// Use a temp dir as both working directory and HOME so that neither
+	// .launch.yaml (cwd) nor ~/.config/launch/config.yaml is found.
 	dir := t.TempDir()
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -113,6 +106,10 @@ func TestLoadNoFileReturnsEmptyConfig(t *testing.T) {
 		t.Fatalf("chdir to temp dir: %v", err)
 	}
 	t.Cleanup(func() { os.Chdir(origDir) })
+
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", dir)
+	_ = origHome
 
 	cfg, err := Load("")
 	if err != nil {
