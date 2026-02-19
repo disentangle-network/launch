@@ -64,7 +64,7 @@ func runInfra(cmd *cobra.Command, args []string) error {
 	result, err := stages.RunInfra(cfg, runner, action)
 	if err != nil {
 		ps.FailStage("infra", err)
-		state.Save(ps, "")
+		_ = state.Save(ps, "")
 		return err
 	}
 

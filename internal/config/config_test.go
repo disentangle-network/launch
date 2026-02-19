@@ -105,7 +105,7 @@ func TestLoadNoFileReturnsEmptyConfig(t *testing.T) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir to temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", dir)
@@ -136,7 +136,7 @@ func TestLoadLocalLaunchYAMLPriority(t *testing.T) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir to temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	// Write a .launch.yaml in the temp dir (now cwd).
 	content := "cluster_name: local-cluster\n"

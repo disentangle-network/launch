@@ -44,7 +44,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	result, err := stages.RunDeploy(cfg, runner)
 	if err != nil {
 		ps.FailStage("deploy", err)
-		state.Save(ps, "")
+		_ = state.Save(ps, "")
 		return err
 	}
 

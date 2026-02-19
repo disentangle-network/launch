@@ -96,7 +96,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 
 		if err := sf.run(); err != nil {
 			ps.FailStage(sf.name, err)
-			state.Save(ps, "")
+			_ = state.Save(ps, "")
 			return fmt.Errorf("stage '%s' failed: %w", sf.name, err)
 		}
 

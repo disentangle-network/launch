@@ -14,7 +14,7 @@ func TestConfig(t *testing.T) *config.Config {
 	dir := t.TempDir()
 	repos := []string{"oci-tf-bootstrap", "k8s-oci-foundation", "genesis-operator", "deploy"}
 	for _, r := range repos {
-		os.MkdirAll(filepath.Join(dir, r), 0o755)
+		_ = os.MkdirAll(filepath.Join(dir, r), 0o755)
 	}
 	return &config.Config{
 		OCIRegion:       "us-test-1",
@@ -37,7 +37,7 @@ func TestConfig(t *testing.T) *config.Config {
 func WriteFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

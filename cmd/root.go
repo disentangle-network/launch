@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -51,13 +50,7 @@ func confirm(prompt string) bool {
 	}
 	fmt.Printf("%s [y/N]: ", prompt)
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response)
 	return response == "y" || response == "Y" || response == "yes"
 }
 
-func exitOnError(err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-}
