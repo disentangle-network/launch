@@ -15,8 +15,8 @@ import (
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Configure credentials for the deployment pipeline",
-	Long: `Interactively configures credentials needed by the pipeline stages.
-Supports: OCI CLI, Cloudflare (via wrangler), GitHub CLI, and SOPS age keys.`,
+	Long: `Interactively configures credentials needed for fleet management.
+Supports: OCI CLI, Cloudflare, GitHub CLI, and SOPS age keys.`,
 	RunE: runSetup,
 }
 

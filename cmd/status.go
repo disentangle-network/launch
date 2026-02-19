@@ -2,16 +2,17 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/disentangle-network/launch/internal/exec"
-	"github.com/disentangle-network/launch/internal/state"
 	"github.com/spf13/cobra"
 )
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show pipeline state and cluster health",
-	Long:  "Displays the current pipeline state and optionally checks cluster health.",
+	Short: "Show fleet health across clusters",
+	Long:  "Checks FluxCD reconciliation status and pod health for each cluster in the fleet.",
 	RunE:  runStatus,
 }
 
@@ -20,50 +21,73 @@ func init() {
 }
 
 func runStatus(cmd *cobra.Command, args []string) error {
-	ps, err := state.Load("")
+	fleetDir := "."
+	clustersDir := filepath.Join(fleetDir, "clusters")
+
+	entries, err := os.ReadDir(clustersDir)
 	if err != nil {
-		return fmt.Errorf("loading state: %w", err)
+		return fmt.Errorf("no clusters/ directory found -- are you in a fleet repo?")
 	}
 
-	if ps == nil {
-		fmt.Println("No pipeline state found. Run 'launch all' or individual stages to begin.")
+	if len(entries) == 0 {
+		fmt.Println("No clusters configured. Run 'launch cluster add <name>' to add one.")
 		return nil
 	}
 
-	fmt.Printf("Pipeline: %s\n", ps.PipelineID)
-	fmt.Printf("Started:  %s\n\n", ps.StartedAt.Format("2006-01-02 15:04:05 UTC"))
+	runner := exec.NewRunner()
 
-	fmt.Println("Stages:")
-	for _, name := range state.StageOrder {
-		s := ps.Stages[name]
-		status := string(s.Status)
-		detail := ""
-		switch s.Status {
-		case state.StatusCompleted:
-			if s.CompletedAt != nil {
-				detail = fmt.Sprintf("  (completed %s)", s.CompletedAt.Format("15:04:05"))
-			}
-		case state.StatusFailed:
-			detail = fmt.Sprintf("  (error: %s)", s.Error)
-		case state.StatusInProgress:
-			if s.StartedAt != nil {
-				detail = fmt.Sprintf("  (started %s)", s.StartedAt.Format("15:04:05"))
-			}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
 		}
-		fmt.Printf("  %-12s %s%s\n", name, status, detail)
-	}
+		name := e.Name()
+		fmt.Printf("=== Cluster: %s ===\n", name)
 
-	// Check cluster health if infra is complete
-	infraStage := ps.Stages["infra"]
-	if infraStage.Status == state.StatusCompleted {
-		fmt.Println("\nCluster health:")
-		runner := exec.NewRunner()
-		if out, err := runner.RunSilent("kubectl", "get", "nodes", "-o", "wide"); err == nil {
-			fmt.Println(out.Stdout)
+		// Try to get flux status
+		if _, err := runner.RunSilent("kubectl", "--context", name, "get", "ns", "flux-system"); err == nil {
+			fmt.Println("  FluxCD:")
+			if out, err := runner.RunSilent("flux", "--context", name, "get", "all", "-A", "--no-header"); err == nil {
+				for _, line := range splitLines(out.Stdout) {
+					if line != "" {
+						fmt.Printf("    %s\n", line)
+					}
+				}
+			} else {
+				fmt.Println("    Could not query flux status")
+			}
+
+			fmt.Println("  Disentangle pods:")
+			if out, err := runner.RunSilent("kubectl", "--context", name, "get", "pods", "-n", "disentangle", "-o", "wide", "--no-headers"); err == nil {
+				if out.Stdout == "" {
+					fmt.Println("    No pods in disentangle namespace")
+				} else {
+					for _, line := range splitLines(out.Stdout) {
+						if line != "" {
+							fmt.Printf("    %s\n", line)
+						}
+					}
+				}
+			}
 		} else {
-			fmt.Println("  Could not reach cluster (kubectl failed)")
+			fmt.Println("  FluxCD not installed (or cluster unreachable)")
 		}
+		fmt.Println()
 	}
 
 	return nil
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
 }

@@ -22,6 +22,7 @@ type Config struct {
 
 	// Cloudflare
 	CloudflareAccountID string `yaml:"cloudflare_account_id"`
+	CloudflareAPIToken  string `yaml:"cloudflare_api_token,omitempty"`
 	Domain              string `yaml:"domain"`
 
 	// GitHub

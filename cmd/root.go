@@ -19,20 +19,20 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "launch",
 	Short: "Deployment orchestrator for the Disentangle Network",
-	Long: `launch manages Disentangle Network deployments across any Kubernetes cluster.
+	Long: `launch manages Disentangle Network fleet deployments across any Kubernetes cluster.
 
-Fleet management:
-  init           Scaffold a fleet monorepo
+Use with the fleet template: github.com/disentangle-network/fleet
+
+Commands:
+  setup          Configure credentials (GitHub, Cloudflare, SOPS)
+  preflight      Validate tools and credentials
   cluster add    Add a cluster to the fleet
+  cluster list   List clusters in the fleet
   secrets init   Bootstrap secrets for a cluster
-  bootstrap      FluxCD bootstrap + genesis unseal
-  mesh           Nebula-PQ overlay mesh management
-  status         Health check across clusters
-
-Legacy pipeline (OCI-specific):
-  discover       OCI resource discovery
-  infra          Provision OKE cluster
-  deploy         Deploy via FluxCD`,
+  bootstrap      FluxCD bootstrap + genesis secrets
+  mesh init      Generate nebula-pq CA certificate
+  mesh add       Generate host certificates for a cluster
+  status         Health check across clusters`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	Version:       fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, buildDate),

@@ -14,6 +14,14 @@ import (
 //
 // Returns the token and a description of the source. If no token can be
 // resolved, returns empty strings and an error.
+// ResolveTokenFromConfig checks the launch config first.
+func ResolveTokenFromConfig(cfgToken string) (token string, source string, err error) {
+	if cfgToken != "" {
+		return cfgToken, "launch config", nil
+	}
+	return ResolveToken()
+}
+
 func ResolveToken() (token string, source string, err error) {
 	if t := os.Getenv("CLOUDFLARE_API_TOKEN"); t != "" {
 		return t, "CLOUDFLARE_API_TOKEN env var", nil
