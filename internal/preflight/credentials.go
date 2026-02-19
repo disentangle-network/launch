@@ -60,29 +60,40 @@ func checkCloudflare() CredentialCheck {
 	result := CredentialCheck{Name: "Cloudflare API Token"}
 
 	token := os.Getenv("CLOUDFLARE_API_TOKEN")
-	if token == "" {
-		result.Status = "missing"
-		result.Detail = "CLOUDFLARE_API_TOKEN not set"
+	if token != "" {
+		runner := exec.NewRunner()
+		out, err := runner.RunSilent("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+			"-H", "Authorization: Bearer "+token,
+			"https://api.cloudflare.com/client/v4/user/tokens/verify")
+		if err != nil {
+			result.Status = "invalid"
+			result.Detail = "token verification request failed"
+			return result
+		}
+
+		if strings.TrimSpace(out.Stdout) == "200" {
+			result.Status = "ok"
+			result.Detail = "token valid"
+		} else {
+			result.Status = "invalid"
+			result.Detail = fmt.Sprintf("token verification returned HTTP %s", strings.TrimSpace(out.Stdout))
+		}
 		return result
 	}
 
-	runner := exec.NewRunner()
-	out, err := runner.RunSilent("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-		"-H", "Authorization: Bearer "+token,
-		"https://api.cloudflare.com/client/v4/user/tokens/verify")
-	if err != nil {
-		result.Status = "invalid"
-		result.Detail = "token verification request failed"
-		return result
+	// Fallback: check if wrangler is authenticated
+	if exec.CommandExists("wrangler") {
+		runner := exec.NewRunner()
+		out, err := runner.RunSilent("wrangler", "whoami")
+		if err == nil && !strings.Contains(out.Stdout, "not authenticated") {
+			result.Status = "ok"
+			result.Detail = "authenticated via wrangler (set CLOUDFLARE_API_TOKEN for non-interactive use)"
+			return result
+		}
 	}
 
-	if strings.TrimSpace(out.Stdout) == "200" {
-		result.Status = "ok"
-		result.Detail = "token valid"
-	} else {
-		result.Status = "invalid"
-		result.Detail = fmt.Sprintf("token verification returned HTTP %s", strings.TrimSpace(out.Stdout))
-	}
+	result.Status = "missing"
+	result.Detail = "CLOUDFLARE_API_TOKEN not set"
 	return result
 }
 
