@@ -1,0 +1,52 @@
+version: 2
+
+project_name: launch
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - main: .
+    binary: launch
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/disentangle-network/launch/cmd.version={{.Version}}
+      - -X github.com/disentangle-network/launch/cmd.commit={{.Commit}}
+      - -X github.com/disentangle-network/launch/cmd.buildDate={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - repository:
+      owner: LarsenClose
+      name: homebrew-tap
+    homepage: https://github.com/disentangle-network/launch
+    description: Deployment orchestrator for the Disentangle Network
+    license: Apache-2.0
+    install: |
+      bin.install "launch"
+    test: |
+      system "#{bin}/launch", "--version"

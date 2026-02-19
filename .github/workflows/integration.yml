@@ -1,0 +1,24 @@
+name: Integration Tests
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # Nightly at 6 AM UTC
+  workflow_dispatch:
+  repository_dispatch:
+    types: [loom-release]
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Run integration tests
+        run: go test -v -tags integration ./integration/...
+        env:
+          LAUNCH_INTEGRATION_LIVE: ""
