@@ -30,11 +30,20 @@ func RunSecrets(cfg *config.Config, runner *exec.Runner) (*SecretsResult, error)
 	fmt.Println("==> Initializing genesis-operator...")
 	initArgs := []string{"init", "--provider=oci"}
 
-	// Add key-id if available from env
-	if keyID := os.Getenv("OCI_VAULT_KEY_OCID"); keyID != "" {
+	// Vault key: prefer config, fall back to env
+	keyID := cfg.OCIVaultKeyOCID
+	if keyID == "" {
+		keyID = os.Getenv("OCI_VAULT_KEY_OCID")
+	}
+	if keyID != "" {
 		initArgs = append(initArgs, "--key-id="+keyID)
 	}
-	if endpoint := os.Getenv("OCI_VAULT_ENDPOINT"); endpoint != "" {
+
+	endpoint := cfg.OCIVaultEndpoint
+	if endpoint == "" {
+		endpoint = os.Getenv("OCI_VAULT_ENDPOINT")
+	}
+	if endpoint != "" {
 		initArgs = append(initArgs, "--endpoint="+endpoint)
 	}
 

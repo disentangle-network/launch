@@ -31,6 +31,11 @@ type Config struct {
 	// Repos
 	Repos Repos `yaml:"repos"`
 
+	// OCI Vault
+	OCIVaultID       string `yaml:"oci_vault_id,omitempty"`
+	OCIVaultKeyOCID  string `yaml:"oci_vault_key_ocid,omitempty"`
+	OCIVaultEndpoint string `yaml:"oci_vault_endpoint,omitempty"`
+
 	// Cluster
 	ClusterName string `yaml:"cluster_name"`
 	Environment string `yaml:"environment"`
