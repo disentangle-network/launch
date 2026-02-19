@@ -59,8 +59,8 @@ func RunDeploy(cfg *config.Config, runner *exec.Runner) (*DeployResult, error) {
 	// Step 3: Deploy via Helm
 	fmt.Println("==> Deploying disentangle-node via Helm...")
 	helmArgs := []string{
-		"upgrade", "--install", "disentangle-node",
-		"./charts/disentangle-node",
+		"upgrade", "--install", "disentangle",
+		"./helm/disentangle",
 		"--namespace", "disentangle",
 		"--create-namespace",
 		"--set", fmt.Sprintf("image.repository=%s", image),
@@ -70,7 +70,7 @@ func RunDeploy(cfg *config.Config, runner *exec.Runner) (*DeployResult, error) {
 	if _, err := runner.Run("helm", helmArgs...); err != nil {
 		// Fallback: try FluxCD reconciliation
 		fmt.Println("==> Helm install failed, triggering FluxCD reconciliation...")
-		if _, err := runner.Run("flux", "reconcile", "helmrelease", "disentangle-node", "-n", "disentangle"); err != nil {
+		if _, err := runner.Run("flux", "reconcile", "helmrelease", "disentangle", "-n", "disentangle"); err != nil {
 			return result, fmt.Errorf("deploy failed (both helm and flux): %w", err)
 		}
 	}

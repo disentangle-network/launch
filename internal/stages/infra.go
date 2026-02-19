@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/disentangle-network/launch/internal/cloudflare"
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 )
@@ -36,6 +37,24 @@ func RunInfra(cfg *config.Config, runner *exec.Runner, action InfraAction) (*Inf
 	env := cfg.Environment
 	if env == "" {
 		env = "dev"
+	}
+
+	// Inject Cloudflare credentials as TF_VAR_ environment variables.
+	// Token resolution: CLOUDFLARE_API_TOKEN env var > wrangler auth token.
+	// The token is never written to disk.
+	if token, source, err := cloudflare.ResolveToken(); err == nil {
+		runner.Env = append(runner.Env, "TF_VAR_cloudflare_api_token="+token)
+		fmt.Printf("==> Cloudflare token resolved via %s\n", source)
+	} else {
+		fmt.Printf("==> WARNING: %v; Terraform may fail for Cloudflare resources\n", err)
+	}
+	if cfg.CloudflareAccountID != "" {
+		runner.Env = append(runner.Env, "TF_VAR_cloudflare_account_id="+cfg.CloudflareAccountID)
+		fmt.Printf("==> Injecting TF_VAR_cloudflare_account_id from config (%s)\n", cfg.CloudflareAccountID)
+	}
+	if cfg.Domain != "" {
+		runner.Env = append(runner.Env, "TF_VAR_cloudflare_domain="+cfg.Domain)
+		fmt.Printf("==> Injecting TF_VAR_cloudflare_domain from config (%s)\n", cfg.Domain)
 	}
 
 	result := &InfraResult{Action: action}
