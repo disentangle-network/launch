@@ -1,0 +1,5 @@
+creation_rules: []
+# Rules are added by `launch secrets init --cluster <name>`
+# Example:
+#   - path_regex: secrets/<cluster-name>/.*
+#     age: age1...

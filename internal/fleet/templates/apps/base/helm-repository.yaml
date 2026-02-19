@@ -1,0 +1,9 @@
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: disentangle
+  namespace: disentangle
+spec:
+  type: oci
+  interval: 10m
+  url: oci://ghcr.io/disentangle-network/charts
