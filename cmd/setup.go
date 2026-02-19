@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/disentangle-network/launch/internal/cloudflare"
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/spf13/cobra"
@@ -62,44 +63,29 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 	// 2. Cloudflare via wrangler
 	fmt.Println("--- Cloudflare ---")
-	if token := os.Getenv("CLOUDFLARE_API_TOKEN"); token != "" {
-		fmt.Println("  CLOUDFLARE_API_TOKEN is set.")
-	} else if exec.CommandExists("wrangler") {
-		out, err := runner.RunSilent("wrangler", "whoami")
-		if err == nil && !strings.Contains(out.Stdout, "not authenticated") {
-			fmt.Println("  Wrangler authenticated.")
-			// Extract account ID from wrangler output
-			if cfg.CloudflareAccountID == "" {
-				for _, line := range strings.Split(out.Stdout, "\n") {
-					// Look for the account ID in the table output (32-char hex)
-					trimmed := strings.TrimSpace(line)
-					parts := strings.Split(trimmed, "│")
-					for _, part := range parts {
-						candidate := strings.TrimSpace(part)
-						if len(candidate) == 32 && isHex(candidate) {
-							cfg.CloudflareAccountID = candidate
-							configChanged = true
-							fmt.Printf("  Auto-detected account ID: %s\n", candidate)
-							break
-						}
-					}
-					if cfg.CloudflareAccountID != "" {
-						break
-					}
-				}
+	if token, source, err := cloudflare.ResolveToken(); err == nil {
+		fmt.Printf("  Cloudflare token resolved via %s.\n", source)
+		_ = token // token is used at runtime, not persisted
+		// Extract account ID if not already set
+		if cfg.CloudflareAccountID == "" {
+			if acctID := cloudflare.ResolveAccountID(); acctID != "" {
+				cfg.CloudflareAccountID = acctID
+				configChanged = true
+				fmt.Printf("  Auto-detected account ID: %s\n", acctID)
 			}
 		} else {
-			fmt.Println("  Wrangler installed but not authenticated.")
-			if confirm("Run 'wrangler login' to authenticate with Cloudflare?") {
-				if _, err := runner.Run("wrangler", "login"); err != nil {
-					fmt.Printf("  WARNING: wrangler login failed: %v\n", err)
-				}
+			fmt.Printf("  Account ID: %s\n", cfg.CloudflareAccountID)
+		}
+	} else if exec.CommandExists("wrangler") {
+		fmt.Println("  Wrangler installed but not authenticated.")
+		if confirm("Run 'wrangler login' to authenticate with Cloudflare?") {
+			if _, err := runner.Run("wrangler", "login"); err != nil {
+				fmt.Printf("  WARNING: wrangler login failed: %v\n", err)
 			}
 		}
 	} else {
-		fmt.Println("  CLOUDFLARE_API_TOKEN not set and wrangler not installed.")
+		fmt.Println("  Cloudflare not configured: " + err.Error())
 		fmt.Println("  Install wrangler: npm install -g wrangler")
-		fmt.Println("  Or create an API token at: https://dash.cloudflare.com/profile/api-tokens")
 	}
 	fmt.Println()
 
@@ -325,11 +311,3 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 	return nil
 }
 
-func isHex(s string) bool {
-	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return false
-		}
-	}
-	return true
-}

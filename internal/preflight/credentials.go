@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/disentangle-network/launch/internal/cloudflare"
 	"github.com/disentangle-network/launch/internal/exec"
 )
 
@@ -59,41 +60,35 @@ func checkOCI() CredentialCheck {
 func checkCloudflare() CredentialCheck {
 	result := CredentialCheck{Name: "Cloudflare API Token"}
 
-	token := os.Getenv("CLOUDFLARE_API_TOKEN")
-	if token != "" {
-		runner := exec.NewRunner()
-		out, err := runner.RunSilent("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-			"-H", "Authorization: Bearer "+token,
-			"https://api.cloudflare.com/client/v4/user/tokens/verify")
-		if err != nil {
-			result.Status = "invalid"
-			result.Detail = "token verification request failed"
-			return result
-		}
-
-		if strings.TrimSpace(out.Stdout) == "200" {
-			result.Status = "ok"
-			result.Detail = "token valid"
-		} else {
-			result.Status = "invalid"
-			result.Detail = fmt.Sprintf("token verification returned HTTP %s", strings.TrimSpace(out.Stdout))
-		}
+	token, source, err := cloudflare.ResolveToken()
+	if err != nil {
+		result.Status = "missing"
+		result.Detail = err.Error()
 		return result
 	}
 
-	// Fallback: check if wrangler is authenticated
-	if exec.CommandExists("wrangler") {
-		runner := exec.NewRunner()
-		out, err := runner.RunSilent("wrangler", "whoami")
-		if err == nil && !strings.Contains(out.Stdout, "not authenticated") {
+	// Validate the resolved token against the Cloudflare API.
+	// Try /user/tokens/verify first (works for API tokens), then fall back
+	// to /zones (works for both API tokens and wrangler OAuth tokens).
+	runner := exec.NewRunner()
+	endpoints := []string{
+		"https://api.cloudflare.com/client/v4/user/tokens/verify",
+		"https://api.cloudflare.com/client/v4/zones?per_page=1",
+	}
+	for _, endpoint := range endpoints {
+		out, curlErr := runner.RunSilent("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+			"-H", "Authorization: Bearer "+token, endpoint)
+		if curlErr != nil {
+			continue
+		}
+		if strings.TrimSpace(out.Stdout) == "200" {
 			result.Status = "ok"
-			result.Detail = "authenticated via wrangler (set CLOUDFLARE_API_TOKEN for non-interactive use)"
+			result.Detail = fmt.Sprintf("authenticated via %s", source)
 			return result
 		}
 	}
-
-	result.Status = "missing"
-	result.Detail = "CLOUDFLARE_API_TOKEN not set"
+	result.Status = "invalid"
+	result.Detail = fmt.Sprintf("token from %s could not be verified against Cloudflare API", source)
 	return result
 }
 
