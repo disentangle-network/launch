@@ -14,11 +14,11 @@ func TestPrintEmpty(t *testing.T) {
 
 	Print(nil)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	if buf.String() != "" {
 		t.Errorf("Print(nil) should produce no output, got %q", buf.String())
 	}
@@ -34,11 +34,11 @@ func TestPrintSteps(t *testing.T) {
 		{Command: "cluster add dev", Description: "Register cluster"},
 	})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	output := buf.String()
 
 	if !strings.Contains(output, "Next steps") {

@@ -37,12 +37,12 @@ func (r *Runner) Run(name string, args ...string) (*Result, error) {
 	cmdStr := name + " " + strings.Join(args, " ")
 
 	if r.DryRun {
-		fmt.Fprintf(r.Stdout, "[dry-run] %s\n", cmdStr)
+		_, _ = fmt.Fprintf(r.Stdout, "[dry-run] %s\n", cmdStr)
 		return &Result{Command: cmdStr, ExitCode: 0}, nil
 	}
 
 	if r.Verbose {
-		fmt.Fprintf(r.Stdout, "$ %s\n", cmdStr)
+		_, _ = fmt.Fprintf(r.Stdout, "$ %s\n", cmdStr)
 	}
 
 	cmd := exec.Command(name, args...)

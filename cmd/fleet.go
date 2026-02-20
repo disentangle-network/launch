@@ -74,12 +74,12 @@ func runFleetInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Removing public origin...")
 	runner.Dir = dir
-	runner.Run("git", "remote", "remove", "origin")
-	runner.Run("git", "remote", "add", "template", "https://github.com/disentangle-network/fleet.git")
+	_, _ = runner.Run("git", "remote", "remove", "origin")
+	_, _ = runner.Run("git", "remote", "add", "template", "https://github.com/disentangle-network/fleet.git")
 
 	if fleetPrivate != "" {
 		fmt.Printf("Setting private remote: %s\n", fleetPrivate)
-		runner.Run("git", "remote", "add", "origin", fleetPrivate)
+		_, _ = runner.Run("git", "remote", "add", "origin", fleetPrivate)
 	} else {
 		cfg, _ := config.Load(cfgFile)
 		owner := "privsim"
@@ -99,7 +99,9 @@ func runFleetInit(cmd *cobra.Command, args []string) error {
 	if cfg != nil {
 		cfg.FleetDir = dir
 		cfgPath, _ := config.DefaultConfigPath()
-		config.Save(cfg, cfgPath)
+		if err := config.Save(cfg, cfgPath); err != nil {
+			fmt.Printf("Warning: could not save config: %v\n", err)
+		}
 		fmt.Printf("Saved fleet_dir to config: %s\n", dir)
 	}
 
@@ -130,7 +132,7 @@ func runFleetStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Fleet repo: %s\n\n", dir)
 
 	fmt.Println("Remotes:")
-	runner.Run("git", "remote", "-v")
+	_, _ = runner.Run("git", "remote", "-v")
 
 	fmt.Println("\nClusters:")
 	clustersDir := filepath.Join(dir, "clusters")
@@ -144,7 +146,7 @@ func runFleetStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("\nStatus:")
-	runner.Run("git", "status", "--short")
+	_, _ = runner.Run("git", "status", "--short")
 
 	return nil
 }

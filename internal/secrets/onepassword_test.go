@@ -1,14 +1,11 @@
 package secrets
 
 import (
-	"os"
 	"testing"
 )
 
 func TestOpReadNoOpCLI(t *testing.T) {
-	oldPath := os.Getenv("PATH")
 	t.Setenv("PATH", "/nonexistent")
-	defer os.Setenv("PATH", oldPath)
 
 	_, err := OpRead("op://vault/item/field")
 	if err == nil {

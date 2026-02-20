@@ -102,10 +102,10 @@ func resolveEnvDir() (string, error) {
 	return envDir, nil
 }
 
-func infraRunner() (*exec.Runner, []string, error) {
+func infraRunner() (*exec.Runner, error) {
 	envDir, err := resolveEnvDir()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	runner := exec.NewRunner()
@@ -116,21 +116,21 @@ func infraRunner() (*exec.Runner, []string, error) {
 		runner.DryRun = true
 		runner.Env = append(runner.Env, "TF_VAR_cloudflare_api_token=<resolved-at-runtime>")
 		fmt.Println("  [dry-run] Skipping secret resolution")
-		return runner, nil, nil
+		return runner, nil
 	}
 
 	token, source, err := cloudflare.ResolveToken()
 	if err != nil {
-		return nil, nil, fmt.Errorf("cloudflare token: %w", err)
+		return nil, fmt.Errorf("cloudflare token: %w", err)
 	}
 	fmt.Printf("  Using Cloudflare token from: %s\n", source)
 	runner.Env = append(runner.Env, "TF_VAR_cloudflare_api_token="+token)
 
-	return runner, nil, nil
+	return runner, nil
 }
 
 func runInfraInit(cmd *cobra.Command, args []string) error {
-	runner, _, err := infraRunner()
+	runner, err := infraRunner()
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func runInfraInit(cmd *cobra.Command, args []string) error {
 }
 
 func runInfraPlan(cmd *cobra.Command, args []string) error {
-	runner, _, err := infraRunner()
+	runner, err := infraRunner()
 	if err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func runInfraPlan(cmd *cobra.Command, args []string) error {
 }
 
 func runInfraApply(cmd *cobra.Command, args []string) error {
-	runner, _, err := infraRunner()
+	runner, err := infraRunner()
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func runInfraApply(cmd *cobra.Command, args []string) error {
 	if !autoYes {
 		fmt.Print("\nApply this plan? [y/N] ")
 		var confirm string
-		fmt.Scanln(&confirm)
+		_, _ = fmt.Scanln(&confirm)
 		if confirm != "y" && confirm != "Y" {
 			fmt.Println("Cancelled.")
 			return nil
@@ -199,7 +199,7 @@ func runInfraApply(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	os.Remove(planFile)
+	_ = os.Remove(planFile)
 
 	fmt.Println("\nOutputs:")
 	_, err = runner.Run("tofu", "output", "-json")
@@ -215,7 +215,7 @@ func runInfraApply(cmd *cobra.Command, args []string) error {
 }
 
 func runInfraDestroy(cmd *cobra.Command, args []string) error {
-	runner, _, err := infraRunner()
+	runner, err := infraRunner()
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func runInfraDestroy(cmd *cobra.Command, args []string) error {
 	if !autoYes {
 		fmt.Print("\n⚠️  DESTROY all infrastructure? This cannot be undone. [y/N] ")
 		var confirm string
-		fmt.Scanln(&confirm)
+		_, _ = fmt.Scanln(&confirm)
 		if confirm != "y" {
 			fmt.Println("Cancelled.")
 			return nil
@@ -235,7 +235,7 @@ func runInfraDestroy(cmd *cobra.Command, args []string) error {
 }
 
 func runInfraOutput(cmd *cobra.Command, args []string) error {
-	runner, _, err := infraRunner()
+	runner, err := infraRunner()
 	if err != nil {
 		return err
 	}
@@ -244,7 +244,7 @@ func runInfraOutput(cmd *cobra.Command, args []string) error {
 }
 
 func runInfraKubeconfig(cmd *cobra.Command, args []string) error {
-	runner, _, err := infraRunner()
+	runner, err := infraRunner()
 	if err != nil {
 		return err
 	}
@@ -274,7 +274,7 @@ func runInfraKubeconfig(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	os.Chmod(kubeconfigPath, 0600)
+	_ = os.Chmod(kubeconfigPath, 0600)
 	fmt.Printf("Kubeconfig saved to %s\n", kubeconfigPath)
 	hints.Print([]hints.NextStep{
 		{Command: "cluster add oci-dev", Description: "Add cluster to fleet"},

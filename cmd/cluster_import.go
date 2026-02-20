@@ -11,8 +11,7 @@ import (
 )
 
 var (
-	importKubeconfig string
-	importContext    string
+	importContext string
 )
 
 var clusterImportCmd = &cobra.Command{
@@ -40,7 +39,9 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 
 	home, _ := os.UserHomeDir()
 	mergedPath := filepath.Join(home, ".config", "launch", "kubeconfig")
-	os.MkdirAll(filepath.Dir(mergedPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(mergedPath), 0755); err != nil {
+		return fmt.Errorf("failed to create config dir: %w", err)
+	}
 
 	runner := exec.NewRunner()
 
@@ -56,7 +57,9 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 
 	if importContext != name {
 		fmt.Printf("Renaming context '%s' → '%s'\n", importContext, name)
-		runner.RunSilent("kubectl", "config", "rename-context", importContext, name, "--kubeconfig", sourcePath)
+		if _, err := runner.RunSilent("kubectl", "config", "rename-context", importContext, name, "--kubeconfig", sourcePath); err != nil {
+			return fmt.Errorf("failed to rename context: %w", err)
+		}
 	}
 
 	if _, err := os.Stat(mergedPath); os.IsNotExist(err) {
@@ -75,7 +78,9 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	runner.RunSilent("kubectl", "config", "use-context", name, "--kubeconfig", mergedPath)
+	if _, err := runner.RunSilent("kubectl", "config", "use-context", name, "--kubeconfig", mergedPath); err != nil {
+		fmt.Printf("Warning: could not set current context: %v\n", err)
+	}
 
 	fmt.Printf("\nCluster '%s' imported to %s\n", name, mergedPath)
 	fmt.Printf("Use: export KUBECONFIG=%s\n", mergedPath)
