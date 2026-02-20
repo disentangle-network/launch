@@ -58,4 +58,3 @@ func confirm(prompt string) bool {
 	_, _ = fmt.Scanln(&response)
 	return response == "y" || response == "Y" || response == "yes"
 }
-

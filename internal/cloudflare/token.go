@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/disentangle-network/launch/internal/exec"
+	"github.com/disentangle-network/launch/internal/secrets"
 )
 
 // ResolveToken returns a Cloudflare API token using the following precedence:
@@ -25,6 +26,20 @@ func ResolveTokenFromConfig(cfgToken string) (token string, source string, err e
 func ResolveToken() (token string, source string, err error) {
 	if t := os.Getenv("CLOUDFLARE_API_TOKEN"); t != "" {
 		return t, "CLOUDFLARE_API_TOKEN env var", nil
+	}
+
+	if t := os.Getenv("OP_CLOUDFLARE_REF"); t != "" {
+		val, opErr := secrets.OpRead(t)
+		if opErr == nil {
+			return val, "1Password (" + t + ")", nil
+		}
+	}
+
+	if exec.CommandExists("op") {
+		val, opErr := secrets.OpRead("op://Infrastructure/disentangle/cloudflare")
+		if opErr == nil {
+			return val, "1Password (default ref)", nil
+		}
 	}
 
 	if !exec.CommandExists("wrangler") {
@@ -83,7 +98,7 @@ func ResolveAccountID() string {
 
 func isHex(s string) bool {
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return false
 		}
 	}

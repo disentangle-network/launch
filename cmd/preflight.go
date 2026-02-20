@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/disentangle-network/launch/internal/hints"
 	"github.com/disentangle-network/launch/internal/preflight"
 	"github.com/spf13/cobra"
 )
@@ -62,5 +63,9 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("\nPreflight checks passed.")
+	hints.Print([]hints.NextStep{
+		{Command: "infra plan", Description: "Preview OCI infrastructure"},
+		{Command: "cluster add <name>", Description: "Add a cluster to the fleet"},
+	})
 	return nil
 }
