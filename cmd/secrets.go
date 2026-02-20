@@ -16,7 +16,7 @@ var secretsCmd = &cobra.Command{
 
 var (
 	secretsCluster  string
-	secretsProvider  string
+	secretsProvider string
 	secretsKeyARN   string
 	secretsFleetDir string
 )

@@ -27,10 +27,10 @@ The CA key is stored locally and must never be committed to git.`,
 }
 
 var (
-	meshCluster       string
-	meshIsLighthouse  bool
+	meshCluster        string
+	meshIsLighthouse   bool
 	meshLighthouseAddr string
-	meshFleetDir      string
+	meshFleetDir       string
 )
 
 var meshAddCmd = &cobra.Command{

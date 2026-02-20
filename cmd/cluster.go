@@ -107,9 +107,10 @@ func runClusterAdd(cmd *cobra.Command, args []string) error {
 	steps := []hints.NextStep{
 		{Command: "secrets init --cluster " + name, Description: "Bootstrap secrets"},
 	}
-	if cfg.NebulaMode == "lighthouse" {
+	switch cfg.NebulaMode {
+	case "lighthouse":
 		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + name + " --lighthouse", Description: "Add as mesh lighthouse"})
-	} else if cfg.NebulaMode == "node" {
+	case "node":
 		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + name, Description: "Add to mesh"})
 	}
 	steps = append(steps, hints.NextStep{Command: "bootstrap --cluster " + name, Description: "Bootstrap FluxCD"})

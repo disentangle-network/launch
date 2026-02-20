@@ -315,4 +315,3 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 	fmt.Printf("  Vault key OCID saved to config.\n")
 	return nil
 }
-
