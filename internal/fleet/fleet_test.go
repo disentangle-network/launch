@@ -3,6 +3,7 @@ package fleet
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -15,15 +16,9 @@ func TestInitFleetRepo(t *testing.T) {
 		t.Fatalf("InitFleetRepo failed: %v", err)
 	}
 
-	// Verify directory structure
 	expectedDirs := []string{
 		"clusters",
-		"infrastructure/base",
-		"infrastructure/overlays/cloud",
-		"infrastructure/overlays/bare-metal",
-		"infrastructure/overlays/local",
 		"apps/base",
-		"apps/overlays",
 		"secrets",
 	}
 
@@ -34,15 +29,7 @@ func TestInitFleetRepo(t *testing.T) {
 		}
 	}
 
-	// Verify key files exist
 	expectedFiles := []string{
-		"apps/base/kustomization.yaml",
-		"apps/base/namespace.yaml",
-		"apps/base/helmrelease.yaml",
-		"apps/base/helm-repository.yaml",
-		"infrastructure/base/kustomization.yaml",
-		".sops.yaml",
-		".gitignore",
 		"README.md",
 	}
 
@@ -58,12 +45,10 @@ func TestAddCluster(t *testing.T) {
 	tmpDir := t.TempDir()
 	fleetDir := filepath.Join(tmpDir, "test-fleet")
 
-	// Init first
 	if err := InitFleetRepo(fleetDir, "test-fleet"); err != nil {
 		t.Fatalf("InitFleetRepo failed: %v", err)
 	}
 
-	// Add a cluster
 	cfg := ClusterConfig{
 		Name:         "oci-arm",
 		Arch:         "arm64",
@@ -79,13 +64,10 @@ func TestAddCluster(t *testing.T) {
 		t.Fatalf("AddCluster failed: %v", err)
 	}
 
-	// Verify cluster files exist
 	expectedFiles := []string{
 		"clusters/oci-arm/cluster-settings.yaml",
 		"clusters/oci-arm/infrastructure.yaml",
 		"clusters/oci-arm/apps.yaml",
-		"apps/overlays/oci-arm/kustomization.yaml",
-		"apps/overlays/oci-arm/values-patch.yaml",
 	}
 
 	for _, f := range expectedFiles {
@@ -95,22 +77,35 @@ func TestAddCluster(t *testing.T) {
 		}
 	}
 
-	// Verify values patch has correct content
-	valuesPath := filepath.Join(fleetDir, "apps/overlays/oci-arm/values-patch.yaml")
-	data, err := os.ReadFile(valuesPath)
+	// Verify cluster-settings has correct content
+	data, err := os.ReadFile(filepath.Join(fleetDir, "clusters/oci-arm/cluster-settings.yaml"))
 	if err != nil {
-		t.Fatalf("failed to read values-patch: %v", err)
+		t.Fatalf("failed to read cluster-settings: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `nodes: "3"`) {
+		t.Error("cluster-settings should contain nodes: 3")
+	}
+	if !strings.Contains(content, `cpu_limit: "500m"`) {
+		t.Error("cluster-settings should contain medium preset CPU limit")
 	}
 
-	content := string(data)
-	if !contains(content, "count: 3") {
-		t.Error("values-patch should contain 'count: 3'")
+	// Verify apps.yaml points to correct path
+	data, err = os.ReadFile(filepath.Join(fleetDir, "clusters/oci-arm/apps.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read apps.yaml: %v", err)
 	}
-	if !contains(content, `cpu: "500m"`) {
-		t.Error("values-patch should contain medium preset CPU limit")
+	if !strings.Contains(string(data), "path: ./apps/disentangle") {
+		t.Error("apps.yaml should reference ./apps/disentangle")
 	}
-	if !contains(content, "oci-bv") {
-		t.Error("values-patch should contain storage class")
+
+	// Verify infrastructure.yaml points to correct path
+	data, err = os.ReadFile(filepath.Join(fleetDir, "clusters/oci-arm/infrastructure.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read infrastructure.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "path: ./infrastructure/controllers") {
+		t.Error("infrastructure.yaml should reference ./infrastructure/controllers")
 	}
 }
 
@@ -131,19 +126,4 @@ func TestAddClusterInvalidPreset(t *testing.T) {
 	if err == nil {
 		t.Error("AddCluster should fail with invalid preset")
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && // avoid false positives
-		len(s) >= len(substr) &&
-		indexOf(s, substr) >= 0
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

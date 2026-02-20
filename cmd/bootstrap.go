@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/disentangle-network/launch/internal/exec"
+	"github.com/disentangle-network/launch/internal/hints"
 	"github.com/spf13/cobra"
 )
 
@@ -129,7 +130,11 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nBootstrap complete for cluster '%s'\n", bootstrapCluster)
 	fmt.Println("FluxCD will now reconcile the fleet repo automatically.")
-	fmt.Printf("Monitor: flux get all -A\n")
+	hints.Print([]hints.NextStep{
+		{Command: "status", Description: "Check deployment health"},
+		{Command: "mesh init", Description: "Generate Nebula-PQ CA certificate"},
+		{Command: "mesh add --cluster " + bootstrapCluster, Description: "Add cluster to PQ mesh"},
+	})
 
 	return nil
 }

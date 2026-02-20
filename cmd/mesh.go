@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/disentangle-network/launch/internal/exec"
+	"github.com/disentangle-network/launch/internal/hints"
 	"github.com/spf13/cobra"
 )
 
@@ -91,7 +92,9 @@ func runMeshInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\nCA certificate generated:\n")
 	fmt.Printf("  Key:  %s (keep secret, never commit to git)\n", caKeyPath)
 	fmt.Printf("  Cert: %s\n", caCrtPath)
-	fmt.Println("\nNext: launch mesh add --cluster <name>")
+	hints.Print([]hints.NextStep{
+		{Command: "mesh add --cluster <name>", Description: "Generate host certs for a cluster"},
+	})
 
 	return nil
 }
@@ -151,7 +154,10 @@ func runMeshAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nHost certificates generated in %s\n", secretsDir)
-	fmt.Println("Next: SOPS-encrypt and commit the secrets directory")
+	hints.Print([]hints.NextStep{
+		{Command: "bootstrap --cluster " + meshCluster, Description: "Bootstrap FluxCD"},
+		{Command: "status", Description: "Check deployment health"},
+	})
 
 	return nil
 }

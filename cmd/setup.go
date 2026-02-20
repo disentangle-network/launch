@@ -9,6 +9,7 @@ import (
 	"github.com/disentangle-network/launch/internal/cloudflare"
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
+	"github.com/disentangle-network/launch/internal/hints"
 	"github.com/spf13/cobra"
 )
 
@@ -172,7 +173,11 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Setup complete. Run 'launch preflight' to verify all credentials.")
+	fmt.Println("Setup complete.")
+	hints.Print([]hints.NextStep{
+		{Command: "preflight", Description: "Verify all tools and credentials"},
+		{Command: "infra plan", Description: "Preview OCI infrastructure"},
+	})
 	return nil
 }
 

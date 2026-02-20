@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/disentangle-network/launch/internal/fleet"
+	"github.com/disentangle-network/launch/internal/hints"
 	"github.com/spf13/cobra"
 )
 
@@ -103,16 +104,16 @@ func runClusterAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\nCluster '%s' added.\n", name)
-	fmt.Println("\nNext steps:")
-	fmt.Printf("  launch secrets init --cluster %s --provider <provider>\n", name)
-	if cfg.NebulaMode != "disabled" {
-		if cfg.NebulaMode == "lighthouse" {
-			fmt.Printf("  launch mesh add --cluster %s --lighthouse\n", name)
-		} else {
-			fmt.Printf("  launch mesh add --cluster %s --lighthouse-addr <ip:port>\n", name)
-		}
+	steps := []hints.NextStep{
+		{Command: "secrets init --cluster " + name, Description: "Bootstrap secrets"},
 	}
-	fmt.Printf("  launch bootstrap --cluster %s\n", name)
+	if cfg.NebulaMode == "lighthouse" {
+		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + name + " --lighthouse", Description: "Add as mesh lighthouse"})
+	} else if cfg.NebulaMode == "node" {
+		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + name, Description: "Add to mesh"})
+	}
+	steps = append(steps, hints.NextStep{Command: "bootstrap --cluster " + name, Description: "Bootstrap FluxCD"})
+	hints.Print(steps)
 
 	return nil
 }

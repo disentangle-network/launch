@@ -145,12 +145,6 @@ func AddCluster(fleetDir string, cfg ClusterConfig) error {
 		return err
 	}
 
-	// Create apps overlay directory
-	overlayDir := filepath.Join(fleetDir, "apps", "overlays", cfg.Name)
-	if err := os.MkdirAll(overlayDir, 0755); err != nil {
-		return err
-	}
-
 	// Generate cluster-settings ConfigMap
 	settingsTmpl := `apiVersion: v1
 kind: ConfigMap
@@ -161,10 +155,21 @@ data:
   cluster_name: "{{.Name}}"
   arch: "{{.Arch}}"
   infra: "{{.Infra}}"
+  nodes: "{{.Nodes}}"
+  resources: "{{.Resources}}"
+  cpu_limit: "{{.CPULimit}}"
+  memory_limit: "{{.MemoryLimit}}"
+  cpu_request: "{{.CPURequest}}"
+  memory_request: "{{.MemoryRequest}}"
+  pow_difficulty: "{{.PowDifficulty}}"
   nebula_mode: "{{.NebulaMode}}"
   nebula_prefix: "{{.NebulaPrefix}}"
 `
-	if err := renderTemplate(filepath.Join(clusterDir, "cluster-settings.yaml"), settingsTmpl, cfg); err != nil {
+	settingsData := struct {
+		ClusterConfig
+		ResourcePreset
+	}{cfg, preset}
+	if err := renderTemplate(filepath.Join(clusterDir, "cluster-settings.yaml"), settingsTmpl, settingsData); err != nil {
 		return err
 	}
 
@@ -179,9 +184,9 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  path: ./infrastructure/overlays/%s
+  path: ./infrastructure/controllers
   prune: true
-`, cfg.Name, cfg.Infra)
+`, cfg.Name)
 
 	if err := os.WriteFile(filepath.Join(clusterDir, "infrastructure.yaml"), []byte(infraKustomization), 0644); err != nil {
 		return err
@@ -198,62 +203,13 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  path: ./apps/overlays/%s
+  path: ./apps/disentangle
   prune: true
   dependsOn:
     - name: %s-infrastructure
-`, cfg.Name, cfg.Name, cfg.Name)
+`, cfg.Name, cfg.Name)
 
 	if err := os.WriteFile(filepath.Join(clusterDir, "apps.yaml"), []byte(appsKustomization), 0644); err != nil {
-		return err
-	}
-
-	// Generate apps overlay kustomization
-	overlayKustomization := `apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - ../../base
-patches:
-  - path: values-patch.yaml
-    target:
-      kind: HelmRelease
-      name: disentangle
-`
-	if err := os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlayKustomization), 0644); err != nil {
-		return err
-	}
-
-	// Generate values patch
-	valuesPatchTmpl := `apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: disentangle
-  namespace: disentangle
-spec:
-  values:
-    nodes:
-      count: {{.Nodes}}
-    resources:
-      limits:
-        cpu: "{{.CPULimit}}"
-        memory: "{{.MemoryLimit}}"
-      requests:
-        cpu: "{{.CPURequest}}"
-        memory: "{{.MemoryRequest}}"
-    pow:
-      difficulty: {{.PowDifficulty}}
-{{- if .StorageClass}}
-    persistence:
-      storageClass: "{{.StorageClass}}"
-{{- end}}
-`
-
-	patchData := struct {
-		ClusterConfig
-		ResourcePreset
-	}{cfg, preset}
-
-	if err := renderTemplate(filepath.Join(overlayDir, "values-patch.yaml"), valuesPatchTmpl, patchData); err != nil {
 		return err
 	}
 

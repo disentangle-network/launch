@@ -41,6 +41,10 @@ type Config struct {
 	ClusterName string `yaml:"cluster_name"`
 	Environment string `yaml:"environment"`
 
+	// Infrastructure
+	InfraDir string `yaml:"infra_dir,omitempty"`
+	FleetDir string `yaml:"fleet_dir,omitempty"`
+
 	// Images
 	ProtocolImage   string `yaml:"protocol_image"`
 	ProtocolVersion string `yaml:"protocol_version"`
