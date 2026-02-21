@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/cloudflare"
 	"github.com/disentangle-network/launch/internal/config"
@@ -264,7 +265,7 @@ func runInfraKubeconfig(cmd *cobra.Command, args []string) error {
 	kubeconfigPath := filepath.Join(infraRoot, "kubeconfig")
 
 	_, err = runner.Run("oci", "ce", "cluster", "create-kubeconfig",
-		"--cluster-id", result.Stdout,
+		"--cluster-id", strings.TrimSpace(result.Stdout),
 		"--file", kubeconfigPath,
 		"--region", region,
 		"--token-version", "2.0.0",

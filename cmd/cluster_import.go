@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
@@ -50,7 +51,7 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("could not determine source context: %w", err)
 		}
-		importContext = result.Stdout
+		importContext = strings.TrimSpace(result.Stdout)
 	}
 
 	fmt.Printf("Importing cluster '%s' from %s (context: %s)\n", name, sourcePath, importContext)
