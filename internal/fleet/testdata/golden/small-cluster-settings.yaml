@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-settings
+  namespace: disentangle
+data:
+  cluster_name: "test-cluster"
+  arch: "arm64"
+  infra: "bare-metal"
+  nodes: "3"
+  resources: "small"
+  cpu_limit: "250m"
+  memory_limit: "256Mi"
+  cpu_request: "50m"
+  memory_request: "64Mi"
+  pow_difficulty: "4"
+  nebula_mode: "disabled"
+  nebula_prefix: "10.42.0"

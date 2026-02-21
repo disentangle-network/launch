@@ -9,6 +9,14 @@ import (
 	"github.com/disentangle-network/launch/internal/secrets"
 )
 
+// Testable seams: package-level function variables that default to real
+// implementations. Tests can swap them to avoid external tool dependencies.
+var (
+	commandExists = exec.CommandExists
+	opRead        = secrets.OpRead
+	newRunner     = func() exec.Executor { return exec.NewRunner() }
+)
+
 // ResolveToken returns a Cloudflare API token using the following precedence:
 //  1. CLOUDFLARE_API_TOKEN environment variable
 //  2. wrangler auth token (OAuth token from wrangler login)
@@ -29,24 +37,24 @@ func ResolveToken() (token string, source string, err error) {
 	}
 
 	if t := os.Getenv("OP_CLOUDFLARE_REF"); t != "" {
-		val, opErr := secrets.OpRead(t)
+		val, opErr := opRead(t)
 		if opErr == nil {
 			return val, "1Password (" + t + ")", nil
 		}
 	}
 
-	if exec.CommandExists("op") {
-		val, opErr := secrets.OpRead("op://Infrastructure/disentangle/cloudflare")
+	if commandExists("op") {
+		val, opErr := opRead("op://Infrastructure/disentangle/cloudflare")
 		if opErr == nil {
 			return val, "1Password (default ref)", nil
 		}
 	}
 
-	if !exec.CommandExists("wrangler") {
+	if !commandExists("wrangler") {
 		return "", "", fmt.Errorf("CLOUDFLARE_API_TOKEN not set and wrangler not installed")
 	}
 
-	runner := exec.NewRunner()
+	runner := newRunner()
 	out, err := runner.RunSilent("wrangler", "auth", "token")
 	if err != nil {
 		return "", "", fmt.Errorf("wrangler auth token failed: %w", err)
@@ -73,11 +81,11 @@ func ResolveToken() (token string, source string, err error) {
 //
 // Returns the account ID or empty string if not found.
 func ResolveAccountID() string {
-	if !exec.CommandExists("wrangler") {
+	if !commandExists("wrangler") {
 		return ""
 	}
 
-	runner := exec.NewRunner()
+	runner := newRunner()
 	out, err := runner.RunSilent("wrangler", "whoami")
 	if err != nil || strings.Contains(out.Stdout, "not authenticated") {
 		return ""

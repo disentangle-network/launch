@@ -250,3 +250,167 @@ func TestSaveCreatesParentDirectories(t *testing.T) {
 		t.Fatal("expected config file to exist after Save()")
 	}
 }
+
+func TestSaveDefaultPath(t *testing.T) {
+	// When path is empty, Save should use DefaultConfigPath (HOME-based).
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	cfg := &Config{Environment: "default-path-test", ClusterName: "save-default"}
+	if err := Save(cfg, ""); err != nil {
+		t.Fatalf("Save(\"\") returned error: %v", err)
+	}
+
+	// Verify the file was written at the expected default location.
+	expectedPath := filepath.Join(dir, ".config", "launch", "config.yaml")
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Fatalf("expected config at %q to exist after Save(\"\")", expectedPath)
+	}
+
+	// Verify the content round-trips.
+	loaded, err := Load(expectedPath)
+	if err != nil {
+		t.Fatalf("Load(%q) returned error: %v", expectedPath, err)
+	}
+	if loaded.Environment != "default-path-test" {
+		t.Errorf("Environment = %q, want %q", loaded.Environment, "default-path-test")
+	}
+	if loaded.ClusterName != "save-default" {
+		t.Errorf("ClusterName = %q, want %q", loaded.ClusterName, "save-default")
+	}
+}
+
+func TestSaveToReadOnlyDir(t *testing.T) {
+	// Create a directory, make it read-only, then try to Save into a
+	// sub-directory that cannot be created.
+	dir := t.TempDir()
+	readOnlyDir := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(readOnlyDir, 0o555); err != nil {
+		t.Fatalf("creating read-only dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readOnlyDir, 0o755) })
+
+	cfgPath := filepath.Join(readOnlyDir, "subdir", "config.yaml")
+	cfg := &Config{Environment: "should-fail"}
+	err := Save(cfg, cfgPath)
+	if err == nil {
+		t.Fatal("Save to read-only directory should return an error")
+	}
+}
+
+func TestSaveToUnwritableFile(t *testing.T) {
+	// Create the parent dir and a read-only file at the target path.
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("old"), 0o444); err != nil {
+		t.Fatalf("writing read-only file: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cfgPath, 0o644) })
+
+	cfg := &Config{Environment: "should-fail"}
+	err := Save(cfg, cfgPath)
+	if err == nil {
+		t.Fatal("Save to read-only file should return an error")
+	}
+}
+
+func TestDefaultConfigDir(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	got, err := DefaultConfigDir()
+	if err != nil {
+		t.Fatalf("DefaultConfigDir() returned error: %v", err)
+	}
+	want := filepath.Join(dir, ".config", "launch")
+	if got != want {
+		t.Errorf("DefaultConfigDir() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	got, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultConfigPath() returned error: %v", err)
+	}
+	want := filepath.Join(dir, ".config", "launch", "config.yaml")
+	if got != want {
+		t.Errorf("DefaultConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestLoadInvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bad.yaml")
+	// Write content that is syntactically invalid YAML.
+	if err := os.WriteFile(cfgPath, []byte(":\n  :\n  - :\n\t  broken"), 0o644); err != nil {
+		t.Fatalf("writing bad yaml: %v", err)
+	}
+
+	_, err := Load(cfgPath)
+	if err == nil {
+		t.Fatal("Load with invalid YAML should return an error")
+	}
+}
+
+func TestLoadFromDefaultConfigPath(t *testing.T) {
+	// Test the fallback path where no explicit path is given, no .launch.yaml
+	// in cwd, but ~/.config/launch/config.yaml exists.
+	dir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getting cwd: %v", err)
+	}
+	// chdir to a clean temp dir (no .launch.yaml here)
+	cwdDir := filepath.Join(dir, "cwd")
+	if err := os.Mkdir(cwdDir, 0o755); err != nil {
+		t.Fatalf("mkdir cwd: %v", err)
+	}
+	if err := os.Chdir(cwdDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	// Set HOME to our temp dir and write the config at the default location.
+	homeDir := filepath.Join(dir, "home")
+	t.Setenv("HOME", homeDir)
+	configDir := filepath.Join(homeDir, ".config", "launch")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("creating config dir: %v", err)
+	}
+	content := "cluster_name: default-fallback\n"
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load(\"\") returned error: %v", err)
+	}
+	if cfg.ClusterName != "default-fallback" {
+		t.Errorf("ClusterName = %q, want %q", cfg.ClusterName, "default-fallback")
+	}
+}
+
+func TestSaveFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	cfg := &Config{Environment: "perms-test"}
+	if err := Save(cfg, cfgPath); err != nil {
+		t.Fatalf("Save() returned error: %v", err)
+	}
+
+	info, err := os.Stat(cfgPath)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
+	}
+	// Save should write with 0o600 permissions.
+	perm := info.Mode().Perm()
+	if perm != 0o600 {
+		t.Errorf("file permissions = %o, want %o", perm, 0o600)
+	}
+}

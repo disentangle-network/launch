@@ -2,10 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 
+	"github.com/disentangle-network/launch/internal/config"
+	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/fleet"
 	"github.com/disentangle-network/launch/internal/hints"
+	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -65,63 +70,89 @@ func init() {
 	clusterAddCmd.Flags().StringVar(&clusterNebulaMode, "nebula", "disabled", "Nebula mesh mode (lighthouse, node, disabled)")
 	clusterAddCmd.Flags().StringVar(&clusterNebulaPrefix, "nebula-prefix", "10.42.0", "Nebula overlay IP prefix")
 	clusterAddCmd.Flags().StringVar(&clusterLHAddr, "nebula-lighthouse", "", "Lighthouse address for node mode (ip:port)")
-	clusterCmd.PersistentFlags().StringVar(&clusterFleetDir, "fleet-dir", ".", "Path to fleet repository root")
+	clusterCmd.PersistentFlags().StringVar(&clusterFleetDir, "fleet-dir", "", "Path to fleet repository root")
 }
 
-func runClusterAdd(cmd *cobra.Command, args []string) error {
-	name := args[0]
+// ClusterAddParams holds all dependencies for ClusterAdd.
+type ClusterAddParams struct {
+	Exec         exec.Executor
+	Paths        *paths.Resolver
+	Stdout       io.Writer
+	Name         string
+	Arch         string
+	Infra        string
+	Nodes        int
+	Resources    string
+	StorageClass string
+	NebulaMode   string
+	NebulaPrefix string
+	LHAddr       string
+	FleetDir     string
+}
+
+// ClusterAdd generates Kustomize overlays and Helm value patches for a new cluster.
+func ClusterAdd(p ClusterAddParams) error {
+	fleetDir := p.Paths.FleetDir(p.FleetDir)
 
 	// Validate fleet dir exists
-	if _, err := os.Stat(clusterFleetDir); os.IsNotExist(err) {
-		return fmt.Errorf("fleet directory not found: %s (run 'launch init' first)", clusterFleetDir)
+	if _, err := os.Stat(fleetDir); os.IsNotExist(err) {
+		return fmt.Errorf("fleet directory not found: %s (run 'launch init' first)", fleetDir)
 	}
 
 	// Check for apps/base as a fleet repo indicator
-	if _, err := os.Stat(fmt.Sprintf("%s/apps/base", clusterFleetDir)); os.IsNotExist(err) {
-		return fmt.Errorf("%s does not appear to be a fleet repo (missing apps/base)", clusterFleetDir)
+	if _, err := os.Stat(filepath.Join(fleetDir, "apps", "base")); os.IsNotExist(err) {
+		return fmt.Errorf("%s does not appear to be a fleet repo (missing apps/base)", fleetDir)
 	}
 
 	cfg := fleet.ClusterConfig{
-		Name:           name,
-		Arch:           clusterArch,
-		Infra:          clusterInfra,
-		Nodes:          clusterNodes,
-		Resources:      clusterResources,
-		StorageClass:   clusterStorageClass,
-		NebulaMode:     clusterNebulaMode,
-		NebulaPrefix:   clusterNebulaPrefix,
-		LighthouseAddr: clusterLHAddr,
+		Name:           p.Name,
+		Arch:           p.Arch,
+		Infra:          p.Infra,
+		Nodes:          p.Nodes,
+		Resources:      p.Resources,
+		StorageClass:   p.StorageClass,
+		NebulaMode:     p.NebulaMode,
+		NebulaPrefix:   p.NebulaPrefix,
+		LighthouseAddr: p.LHAddr,
 	}
 
-	fmt.Printf("Adding cluster '%s' to fleet:\n", name)
-	fmt.Printf("  arch: %s, infra: %s, nodes: %d, resources: %s\n", cfg.Arch, cfg.Infra, cfg.Nodes, cfg.Resources)
+	fmt.Fprintf(p.Stdout, "Adding cluster '%s' to fleet:\n", p.Name)
+	fmt.Fprintf(p.Stdout, "  arch: %s, infra: %s, nodes: %d, resources: %s\n", cfg.Arch, cfg.Infra, cfg.Nodes, cfg.Resources)
 	if cfg.NebulaMode != "disabled" {
-		fmt.Printf("  nebula: %s, prefix: %s\n", cfg.NebulaMode, cfg.NebulaPrefix)
+		fmt.Fprintf(p.Stdout, "  nebula: %s, prefix: %s\n", cfg.NebulaMode, cfg.NebulaPrefix)
 	}
 
-	if err := fleet.AddCluster(clusterFleetDir, cfg); err != nil {
+	if err := fleet.AddCluster(fleetDir, cfg); err != nil {
 		return fmt.Errorf("failed to add cluster: %w", err)
 	}
 
-	fmt.Printf("\nCluster '%s' added.\n", name)
+	fmt.Fprintf(p.Stdout, "\nCluster '%s' added.\n", p.Name)
 	steps := []hints.NextStep{
-		{Command: "secrets init --cluster " + name, Description: "Bootstrap secrets"},
+		{Command: "secrets init --cluster " + p.Name, Description: "Bootstrap secrets"},
 	}
 	switch cfg.NebulaMode {
 	case "lighthouse":
-		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + name + " --lighthouse", Description: "Add as mesh lighthouse"})
+		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + p.Name + " --lighthouse", Description: "Add as mesh lighthouse"})
 	case "node":
-		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + name, Description: "Add to mesh"})
+		steps = append(steps, hints.NextStep{Command: "mesh add --cluster " + p.Name, Description: "Add to mesh"})
 	}
-	steps = append(steps, hints.NextStep{Command: "bootstrap --cluster " + name, Description: "Bootstrap FluxCD"})
-	hints.Print(steps)
+	steps = append(steps, hints.NextStep{Command: "bootstrap --cluster " + p.Name, Description: "Bootstrap FluxCD"})
+	hints.Fprint(p.Stdout, steps)
 
 	return nil
 }
 
-func runClusterList(cmd *cobra.Command, args []string) error {
-	fleetDir := clusterFleetDir
-	clustersDir := fmt.Sprintf("%s/clusters", fleetDir)
+// ClusterListParams holds all dependencies for ClusterList.
+type ClusterListParams struct {
+	Paths    *paths.Resolver
+	Stdout   io.Writer
+	FleetDir string
+}
+
+// ClusterList lists all clusters in the fleet.
+func ClusterList(p ClusterListParams) error {
+	fleetDir := p.Paths.FleetDir(p.FleetDir)
+	clustersDir := filepath.Join(fleetDir, "clusters")
 
 	entries, err := os.ReadDir(clustersDir)
 	if err != nil {
@@ -129,16 +160,55 @@ func runClusterList(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(entries) == 0 {
-		fmt.Println("No clusters configured. Run 'launch cluster add <name>' to add one.")
+		fmt.Fprintln(p.Stdout, "No clusters configured. Run 'launch cluster add <name>' to add one.")
 		return nil
 	}
 
-	fmt.Println("Clusters:")
+	fmt.Fprintln(p.Stdout, "Clusters:")
 	for _, e := range entries {
 		if e.IsDir() {
-			fmt.Printf("  %s\n", e.Name())
+			fmt.Fprintf(p.Stdout, "  %s\n", e.Name())
 		}
 	}
 
 	return nil
+}
+
+func runClusterAdd(cmd *cobra.Command, args []string) error {
+	runner := exec.NewRunner()
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return ClusterAdd(ClusterAddParams{
+		Exec:         runner,
+		Paths:        p,
+		Stdout:       os.Stdout,
+		Name:         args[0],
+		Arch:         clusterArch,
+		Infra:        clusterInfra,
+		Nodes:        clusterNodes,
+		Resources:    clusterResources,
+		StorageClass: clusterStorageClass,
+		NebulaMode:   clusterNebulaMode,
+		NebulaPrefix: clusterNebulaPrefix,
+		LHAddr:       clusterLHAddr,
+		FleetDir:     clusterFleetDir,
+	})
+}
+
+func runClusterList(cmd *cobra.Command, args []string) error {
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return ClusterList(ClusterListParams{
+		Paths:    p,
+		Stdout:   os.Stdout,
+		FleetDir: clusterFleetDir,
+	})
 }

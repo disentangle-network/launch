@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-settings
+  namespace: disentangle
+data:
+  cluster_name: "test-cluster"
+  arch: "amd64"
+  infra: "cloud"
+  nodes: "3"
+  resources: "large"
+  cpu_limit: "2"
+  memory_limit: "4Gi"
+  cpu_request: "500m"
+  memory_request: "1Gi"
+  pow_difficulty: "16"
+  nebula_mode: "disabled"
+  nebula_prefix: "10.42.0"

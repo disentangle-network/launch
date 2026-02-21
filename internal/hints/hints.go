@@ -1,19 +1,29 @@
 package hints
 
-import "fmt"
+import (
+	"fmt"
+	"io"
+	"os"
+)
 
 type NextStep struct {
 	Command     string
 	Description string
 }
 
-func Print(steps []NextStep) {
+// Fprint writes formatted next-step hints to the given writer.
+func Fprint(w io.Writer, steps []NextStep) {
 	if len(steps) == 0 {
 		return
 	}
-	fmt.Println("\n--- Next steps ---")
+	fmt.Fprintln(w, "\n--- Next steps ---")
 	for _, s := range steps {
-		fmt.Printf("  launch-disentangle %-30s  %s\n", s.Command, s.Description)
+		fmt.Fprintf(w, "  launch-disentangle %-30s  %s\n", s.Command, s.Description)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
+}
+
+// Print writes formatted next-step hints to stdout.
+func Print(steps []NextStep) {
+	Fprint(os.Stdout, steps)
 }

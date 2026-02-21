@@ -2,13 +2,17 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
+	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var meshCmd = &cobra.Command{
@@ -56,14 +60,20 @@ func init() {
 	_ = meshAddCmd.MarkFlagRequired("cluster")
 }
 
-func runMeshInit(cmd *cobra.Command, args []string) error {
-	caDir := meshCAOutput
+// MeshInitParams holds all dependencies for MeshInit.
+type MeshInitParams struct {
+	Exec     exec.Executor
+	Paths    *paths.Resolver
+	Stdout   io.Writer
+	CAOutput string // flag override for CA output directory
+	CfgFile  string // config file path
+}
+
+// MeshInit generates a new nebula-pq CA certificate.
+func MeshInit(p MeshInitParams) error {
+	caDir := p.CAOutput
 	if caDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		caDir = filepath.Join(home, ".config", "disentangle", "nebula-ca")
+		caDir = p.Paths.NebulaCADir()
 	}
 
 	if err := os.MkdirAll(caDir, 0700); err != nil {
@@ -79,7 +89,7 @@ func runMeshInit(cmd *cobra.Command, args []string) error {
 
 	// Use domain from config for CA name, fall back to github_org
 	caName := "disentangle"
-	cfg, _ := config.Load(cfgFile)
+	cfg, _ := config.Load(p.CfgFile)
 	if cfg != nil {
 		if cfg.Domain != "" {
 			caName = cfg.Domain
@@ -88,10 +98,9 @@ func runMeshInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Generating nebula-pq CA certificate (ML-DSA-87)...")
+	fmt.Fprintln(p.Stdout, "Generating nebula-pq CA certificate (ML-DSA-87)...")
 
-	runner := exec.NewRunner()
-	_, err := runner.Run("nebula-cert", "ca",
+	_, err := p.Exec.Run("nebula-cert", "ca",
 		"-curve", "PQ",
 		"-name", caName,
 		"-out-key", caKeyPath,
@@ -101,75 +110,151 @@ func runMeshInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to generate CA: %w", err)
 	}
 
-	fmt.Printf("\nCA certificate generated:\n")
-	fmt.Printf("  Key:  %s (keep secret, never commit to git)\n", caKeyPath)
-	fmt.Printf("  Cert: %s\n", caCrtPath)
-	hints.Print([]hints.NextStep{
+	fmt.Fprintf(p.Stdout, "\nCA certificate generated:\n")
+	fmt.Fprintf(p.Stdout, "  Key:  %s (keep secret, never commit to git)\n", caKeyPath)
+	fmt.Fprintf(p.Stdout, "  Cert: %s\n", caCrtPath)
+	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "mesh add --cluster <name>", Description: "Generate host certs for a cluster"},
 	})
 
 	return nil
 }
 
-func runMeshAdd(cmd *cobra.Command, args []string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
+// MeshAddParams holds all dependencies for MeshAdd.
+type MeshAddParams struct {
+	Exec           exec.Executor
+	Paths          *paths.Resolver
+	Stdout         io.Writer
+	Cluster        string
+	FleetDir       string
+	IsLighthouse   bool
+	LighthouseAddr string
+}
 
-	caDir := filepath.Join(home, ".config", "disentangle", "nebula-ca")
-	caKeyPath := filepath.Join(caDir, "ca.key")
-	caCrtPath := filepath.Join(caDir, "ca.crt")
+// clusterSettingsConfigMap represents the Kubernetes ConfigMap structure
+// used in cluster-settings.yaml files.
+type clusterSettingsConfigMap struct {
+	Data struct {
+		Nodes        string `yaml:"nodes"`
+		NebulaPrefix string `yaml:"nebula_prefix"`
+	} `yaml:"data"`
+}
+
+// MeshAdd generates nebula host certificates for each node in a cluster.
+func MeshAdd(p MeshAddParams) error {
+	caKeyPath := p.Paths.NebulaCAKey()
+	caCrtPath := p.Paths.NebulaCACert()
 
 	if _, err := os.Stat(caKeyPath); os.IsNotExist(err) {
-		return fmt.Errorf("no CA found at %s (run 'launch mesh init' first)", caDir)
+		return fmt.Errorf("no CA found at %s (run 'launch mesh init' first)", p.Paths.NebulaCADir())
 	}
 
 	// Read cluster settings to get node count and nebula prefix
-	settingsPath := filepath.Join(meshFleetDir, "clusters", meshCluster, "cluster-settings.yaml")
+	clusterDir := p.Paths.FleetClusterDir(p.FleetDir, p.Cluster)
+	settingsPath := filepath.Join(clusterDir, "cluster-settings.yaml")
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
-		return fmt.Errorf("cluster '%s' not found (run 'launch cluster add %s' first)", meshCluster, meshCluster)
+		return fmt.Errorf("cluster '%s' not found (run 'launch cluster add %s' first)", p.Cluster, p.Cluster)
+	}
+
+	// Parse cluster-settings.yaml to get node count
+	settingsData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return fmt.Errorf("reading cluster settings: %w", err)
+	}
+
+	var settings clusterSettingsConfigMap
+	if err := yaml.Unmarshal(settingsData, &settings); err != nil {
+		return fmt.Errorf("parsing cluster settings: %w", err)
+	}
+
+	nodeCount := 1
+	if settings.Data.Nodes != "" {
+		n, err := strconv.Atoi(settings.Data.Nodes)
+		if err != nil {
+			return fmt.Errorf("invalid node count %q in cluster settings: %w", settings.Data.Nodes, err)
+		}
+		nodeCount = n
+	}
+
+	nebulaPrefix := "10.42.0"
+	if settings.Data.NebulaPrefix != "" {
+		nebulaPrefix = settings.Data.NebulaPrefix
 	}
 
 	// Create secrets directory for this cluster
-	secretsDir := filepath.Join(meshFleetDir, "secrets", meshCluster)
+	secretsDir := p.Paths.FleetSecretsDir(p.FleetDir, p.Cluster)
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		return err
 	}
 
-	fmt.Printf("Generating nebula-pq host certificates for cluster '%s'...\n", meshCluster)
-
-	// For now, generate a single host cert for the cluster
-	// In production, iterate over node count from cluster-settings
-	runner := exec.NewRunner()
-
-	certName := fmt.Sprintf("%s-node", meshCluster)
-	certKeyPath := filepath.Join(secretsDir, fmt.Sprintf("%s.key", certName))
-	certCrtPath := filepath.Join(secretsDir, fmt.Sprintf("%s.crt", certName))
+	fmt.Fprintf(p.Stdout, "Generating nebula-pq host certificates for cluster '%s' (%d nodes)...\n", p.Cluster, nodeCount)
 
 	groups := "disentangle"
-	if meshIsLighthouse {
+	if p.IsLighthouse {
 		groups = "disentangle,lighthouse"
 	}
 
-	_, err = runner.Run("nebula-cert", "sign",
-		"-ca-key", caKeyPath,
-		"-ca-crt", caCrtPath,
-		"-name", certName,
-		"-networks", "10.42.0.1/16",
-		"-groups", groups,
-		"-out-key", certKeyPath,
-		"-out-crt", certCrtPath,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to generate host cert: %w", err)
+	for i := 1; i <= nodeCount; i++ {
+		certName := fmt.Sprintf("%s-node%d", p.Cluster, i)
+		certKeyPath := filepath.Join(secretsDir, fmt.Sprintf("%s.key", certName))
+		certCrtPath := filepath.Join(secretsDir, fmt.Sprintf("%s.crt", certName))
+		ip := fmt.Sprintf("%s.%d/16", nebulaPrefix, i)
+
+		_, err := p.Exec.Run("nebula-cert", "sign",
+			"-ca-key", caKeyPath,
+			"-ca-crt", caCrtPath,
+			"-name", certName,
+			"-networks", ip,
+			"-groups", groups,
+			"-out-key", certKeyPath,
+			"-out-crt", certCrtPath,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to generate host cert for %s: %w", certName, err)
+		}
 	}
 
-	fmt.Printf("\nHost certificates generated in %s\n", secretsDir)
-	hints.Print([]hints.NextStep{
-		{Command: "bootstrap --cluster " + meshCluster, Description: "Bootstrap FluxCD"},
+	fmt.Fprintf(p.Stdout, "\nHost certificates generated in %s\n", secretsDir)
+	hints.Fprint(p.Stdout, []hints.NextStep{
+		{Command: "bootstrap --cluster " + p.Cluster, Description: "Bootstrap FluxCD"},
 		{Command: "status", Description: "Check deployment health"},
 	})
 
 	return nil
+}
+
+func runMeshInit(cmd *cobra.Command, args []string) error {
+	runner := exec.NewRunner()
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return MeshInit(MeshInitParams{
+		Exec:     runner,
+		Paths:    p,
+		Stdout:   os.Stdout,
+		CAOutput: meshCAOutput,
+		CfgFile:  cfgFile,
+	})
+}
+
+func runMeshAdd(cmd *cobra.Command, args []string) error {
+	runner := exec.NewRunner()
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return MeshAdd(MeshAddParams{
+		Exec:           runner,
+		Paths:          p,
+		Stdout:         os.Stdout,
+		Cluster:        meshCluster,
+		FleetDir:       meshFleetDir,
+		IsLighthouse:   meshIsLighthouse,
+		LighthouseAddr: meshLighthouseAddr,
+	})
 }

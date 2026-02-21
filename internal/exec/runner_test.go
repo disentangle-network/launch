@@ -226,6 +226,36 @@ func TestNewRunner(t *testing.T) {
 	}
 }
 
+func TestRunnerSetDir(t *testing.T) {
+	r := NewRunner()
+	r.SetDir("/tmp/test-dir")
+	if r.GetDir() != "/tmp/test-dir" {
+		t.Errorf("GetDir() = %q, want %q", r.GetDir(), "/tmp/test-dir")
+	}
+}
+
+func TestRunnerSetEnv(t *testing.T) {
+	r := NewRunner()
+	r.SetEnv([]string{"FOO=bar", "BAZ=qux"})
+	if len(r.Env) != 2 {
+		t.Errorf("len(Env) = %d, want 2", len(r.Env))
+	}
+	if r.Env[0] != "FOO=bar" {
+		t.Errorf("Env[0] = %q, want %q", r.Env[0], "FOO=bar")
+	}
+}
+
+func TestRunnerGetDirEmpty(t *testing.T) {
+	r := NewRunner()
+	if r.GetDir() != "" {
+		t.Errorf("GetDir() = %q, want empty", r.GetDir())
+	}
+}
+
+func TestRunnerImplementsExecutor(t *testing.T) {
+	var _ Executor = NewRunner()
+}
+
 func TestRunWithEnv(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	r := &Runner{

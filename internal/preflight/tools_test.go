@@ -61,3 +61,10 @@ func TestRequiredToolsNotEmpty(t *testing.T) {
 		t.Error("RequiredTools should not be empty")
 	}
 }
+
+func TestCheckToolsReturnsResults(t *testing.T) {
+	results := CheckTools()
+	if len(results) != len(RequiredTools) {
+		t.Errorf("expected %d tool check results, got %d", len(RequiredTools), len(results))
+	}
+}

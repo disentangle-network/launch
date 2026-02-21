@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
+	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
+	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -43,71 +46,100 @@ func init() {
 	_ = secretsInitCmd.MarkFlagRequired("cluster")
 }
 
-func runSecretsInit(cmd *cobra.Command, args []string) error {
+// SecretsInitParams holds all dependencies for SecretsInit.
+type SecretsInitParams struct {
+	Exec     exec.Executor
+	Paths    *paths.Resolver
+	Stdout   io.Writer
+	Cluster  string
+	Provider string
+	KeyARN   string
+	FleetDir string
+}
+
+// SecretsInit initializes secrets for a cluster using the specified KMS provider.
+func SecretsInit(p SecretsInitParams) error {
 	// Verify cluster exists
-	clusterDir := filepath.Join(secretsFleetDir, "clusters", secretsCluster)
+	clusterDir := p.Paths.FleetClusterDir(p.FleetDir, p.Cluster)
 	if _, err := os.Stat(clusterDir); os.IsNotExist(err) {
-		return fmt.Errorf("cluster '%s' not found (run 'launch cluster add %s' first)", secretsCluster, secretsCluster)
+		return fmt.Errorf("cluster '%s' not found (run 'launch cluster add %s' first)", p.Cluster, p.Cluster)
 	}
 
 	// Create secrets directory
-	secretsDir := filepath.Join(secretsFleetDir, "secrets", secretsCluster)
+	secretsDir := p.Paths.FleetSecretsDir(p.FleetDir, p.Cluster)
 	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		return err
 	}
 
-	fmt.Printf("Initializing secrets for cluster '%s' (provider: %s)\n", secretsCluster, secretsProvider)
+	fmt.Fprintf(p.Stdout, "Initializing secrets for cluster '%s' (provider: %s)\n", p.Cluster, p.Provider)
 
-	runner := exec.NewRunner()
-
-	switch secretsProvider {
+	switch p.Provider {
 	case "age":
 		// Generate age keypair
 		keyPath := filepath.Join(secretsDir, "age.key")
 		if _, err := os.Stat(keyPath); err == nil {
-			fmt.Printf("Age key already exists at %s\n", keyPath)
+			fmt.Fprintf(p.Stdout, "Age key already exists at %s\n", keyPath)
 			return nil
 		}
 
-		result, err := runner.Run("age-keygen", "-o", keyPath)
+		result, err := p.Exec.Run("age-keygen", "-o", keyPath)
 		if err != nil {
 			return fmt.Errorf("failed to generate age key: %w", err)
 		}
 
 		// Extract public key from output
-		fmt.Printf("Age key generated at %s\n", keyPath)
+		fmt.Fprintf(p.Stdout, "Age key generated at %s\n", keyPath)
 		if result != nil && len(result.Stdout) > 0 {
-			fmt.Printf("Public key: %s\n", result.Stdout)
+			fmt.Fprintf(p.Stdout, "Public key: %s\n", result.Stdout)
 		}
 
 		// Update .sops.yaml
-		fmt.Printf("\nAdd this to %s/.sops.yaml:\n", secretsFleetDir)
-		fmt.Printf("  - path_regex: secrets/%s/.*\n", secretsCluster)
-		fmt.Printf("    age: <public-key-from-above>\n")
+		fmt.Fprintf(p.Stdout, "\nAdd this to %s/.sops.yaml:\n", p.FleetDir)
+		fmt.Fprintf(p.Stdout, "  - path_regex: secrets/%s/.*\n", p.Cluster)
+		fmt.Fprintf(p.Stdout, "    age: <public-key-from-above>\n")
 
 	case "yubikey":
-		fmt.Println("YubiKey provider: genesis init will be called during bootstrap")
-		fmt.Println("Ensure your YubiKey is connected when running 'launch bootstrap'")
+		fmt.Fprintln(p.Stdout, "YubiKey provider: genesis init will be called during bootstrap")
+		fmt.Fprintln(p.Stdout, "Ensure your YubiKey is connected when running 'launch bootstrap'")
 
 	case "oci-vault", "aws-kms", "gcp-kms":
-		if secretsKeyARN == "" {
-			return fmt.Errorf("--key-arn is required for provider %s", secretsProvider)
+		if p.KeyARN == "" {
+			return fmt.Errorf("--key-arn is required for provider %s", p.Provider)
 		}
-		fmt.Printf("KMS key: %s\n", secretsKeyARN)
-		fmt.Println("Genesis will use this key during bootstrap to envelope-encrypt the age key")
+		fmt.Fprintf(p.Stdout, "KMS key: %s\n", p.KeyARN)
+		fmt.Fprintln(p.Stdout, "Genesis will use this key during bootstrap to envelope-encrypt the age key")
 
 	default:
-		return fmt.Errorf("unknown provider: %s (valid: age, yubikey, oci-vault, aws-kms, gcp-kms)", secretsProvider)
+		return fmt.Errorf("unknown provider: %s (valid: age, yubikey, oci-vault, aws-kms, gcp-kms)", p.Provider)
 	}
 
 	// Write provider config for bootstrap to use later
-	providerCfg := fmt.Sprintf("provider: %s\nkey_arn: %s\ncluster: %s\n", secretsProvider, secretsKeyARN, secretsCluster)
+	providerCfg := fmt.Sprintf("provider: %s\nkey_arn: %s\ncluster: %s\n", p.Provider, p.KeyARN, p.Cluster)
 	cfgPath := filepath.Join(secretsDir, "genesis-config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(providerCfg), 0600); err != nil {
 		return err
 	}
 
-	fmt.Printf("\nSecrets initialized for cluster '%s'\n", secretsCluster)
-	fmt.Printf("Next: launch bootstrap --cluster %s\n", secretsCluster)
+	fmt.Fprintf(p.Stdout, "\nSecrets initialized for cluster '%s'\n", p.Cluster)
+	fmt.Fprintf(p.Stdout, "Next: launch bootstrap --cluster %s\n", p.Cluster)
 	return nil
+}
+
+func runSecretsInit(cmd *cobra.Command, args []string) error {
+	runner := exec.NewRunner()
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return SecretsInit(SecretsInitParams{
+		Exec:     runner,
+		Paths:    p,
+		Stdout:   os.Stdout,
+		Cluster:  secretsCluster,
+		Provider: secretsProvider,
+		KeyARN:   secretsKeyARN,
+		FleetDir: secretsFleetDir,
+	})
 }

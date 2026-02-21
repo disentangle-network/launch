@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
+	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +19,22 @@ var (
 	infraEnv string
 	infraDir string
 )
+
+// InfraParams holds all injectable dependencies for testable infra functions.
+type InfraParams struct {
+	Exec              exec.Executor
+	Paths             *paths.Resolver
+	Stdout            io.Writer
+	Env               string
+	Dir               string // flag override for infra dir
+	CfgFile           string
+	DryRun            bool
+	Verbose           bool
+	AutoYes           bool
+	ConfirmFunc       func(string) bool
+	TokenResolverFunc func() (string, string, error)
+	Region            string // OCI region for kubeconfig
+}
 
 var infraCmd = &cobra.Command{
 	Use:   "infra",
@@ -73,141 +91,116 @@ func init() {
 	infraCmd.PersistentFlags().StringVar(&infraDir, "dir", "", "Infrastructure repo root (default: auto-detect)")
 }
 
-func resolveInfraDir() (string, error) {
-	if infraDir != "" {
-		return infraDir, nil
+// resolveInfraParams resolves the infra and env directories from InfraParams, sets up
+// the executor's working directory and environment variables (including Cloudflare token).
+func resolveInfraParams(p *InfraParams) (infraRoot, envDir string, err error) {
+	infraRoot = p.Paths.InfraDir(p.Dir)
+	if infraRoot == "" {
+		return "", "", fmt.Errorf("could not find k8s-oci-foundation repo (use --dir or set repos.k8s_oci_foundation in config)")
 	}
 
-	cfg, _ := config.Load(cfgFile)
-	if cfg != nil {
-		if cfg.InfraDir != "" {
-			return cfg.InfraDir, nil
-		}
-		if cfg.Repos.K8sOCIFoundation != "" {
-			return cfg.Repos.K8sOCIFoundation, nil
-		}
+	envDir = p.Paths.InfraEnvDir(infraRoot, p.Env)
+	if _, statErr := os.Stat(envDir); os.IsNotExist(statErr) {
+		return "", "", fmt.Errorf("environment '%s' not found at %s", p.Env, envDir)
 	}
 
-	return "", fmt.Errorf("could not find k8s-oci-foundation repo (use --dir or set repos.k8s_oci_foundation in config)")
+	p.Exec.SetDir(envDir)
+
+	if p.DryRun {
+		p.Exec.SetEnv([]string{"TF_VAR_cloudflare_api_token=<resolved-at-runtime>"})
+		fmt.Fprintln(p.Stdout, "  [dry-run] Skipping secret resolution")
+		return infraRoot, envDir, nil
+	}
+
+	resolveToken := p.TokenResolverFunc
+	if resolveToken == nil {
+		resolveToken = cloudflare.ResolveToken
+	}
+	token, source, tokenErr := resolveToken()
+	if tokenErr != nil {
+		return "", "", fmt.Errorf("cloudflare token: %w", tokenErr)
+	}
+	fmt.Fprintf(p.Stdout, "  Using Cloudflare token from: %s\n", source)
+	p.Exec.SetEnv([]string{"TF_VAR_cloudflare_api_token=" + token})
+
+	return infraRoot, envDir, nil
 }
 
-func resolveEnvDir() (string, error) {
-	root, err := resolveInfraDir()
-	if err != nil {
-		return "", err
+// infraConfirm checks the ConfirmFunc (or defaults to auto-yes if nil).
+func infraConfirm(p InfraParams, prompt string) bool {
+	if p.ConfirmFunc != nil {
+		return p.ConfirmFunc(prompt)
 	}
-	envDir := filepath.Join(root, "environments", infraEnv)
-	if _, err := os.Stat(envDir); os.IsNotExist(err) {
-		return "", fmt.Errorf("environment '%s' not found at %s", infraEnv, envDir)
-	}
-	return envDir, nil
+	return true
 }
 
-func infraRunner() (*exec.Runner, error) {
-	envDir, err := resolveEnvDir()
-	if err != nil {
-		return nil, err
-	}
-
-	runner := exec.NewRunner()
-	runner.Dir = envDir
-	runner.Verbose = verbose
-
-	if dryRun {
-		runner.DryRun = true
-		runner.Env = append(runner.Env, "TF_VAR_cloudflare_api_token=<resolved-at-runtime>")
-		fmt.Println("  [dry-run] Skipping secret resolution")
-		return runner, nil
-	}
-
-	token, source, err := cloudflare.ResolveToken()
-	if err != nil {
-		return nil, fmt.Errorf("cloudflare token: %w", err)
-	}
-	fmt.Printf("  Using Cloudflare token from: %s\n", source)
-	runner.Env = append(runner.Env, "TF_VAR_cloudflare_api_token="+token)
-
-	return runner, nil
-}
-
-func runInfraInit(cmd *cobra.Command, args []string) error {
-	runner, err := infraRunner()
-	if err != nil {
+// InfraInit initializes Terraform providers.
+func InfraInit(p InfraParams) error {
+	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
 	}
-	fmt.Println("Initializing Terraform...")
-	_, err = runner.Run("tofu", "init", "-upgrade")
-	if err != nil {
+	fmt.Fprintln(p.Stdout, "Initializing Terraform...")
+	if _, err := p.Exec.Run("tofu", "init", "-upgrade"); err != nil {
 		return err
 	}
-	hints.Print([]hints.NextStep{
+	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "infra plan", Description: "Preview infrastructure changes"},
 	})
 	return nil
 }
 
-func runInfraPlan(cmd *cobra.Command, args []string) error {
-	runner, err := infraRunner()
-	if err != nil {
+// InfraPlan runs init + plan.
+func InfraPlan(p InfraParams) error {
+	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
 	}
-
-	fmt.Println("Initializing...")
-	if _, err := runner.Run("tofu", "init", "-upgrade"); err != nil {
+	fmt.Fprintln(p.Stdout, "Initializing...")
+	if _, err := p.Exec.Run("tofu", "init", "-upgrade"); err != nil {
 		return err
 	}
-
-	fmt.Println("\nPlanning...")
-	_, err = runner.Run("tofu", "plan", "-var-file=terraform.tfvars", "-out=tfplan")
-	if err != nil {
+	fmt.Fprintln(p.Stdout, "\nPlanning...")
+	if _, err := p.Exec.Run("tofu", "plan", "-var-file=terraform.tfvars", "-out=tfplan"); err != nil {
 		return err
 	}
-	hints.Print([]hints.NextStep{
+	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "infra apply", Description: "Apply the plan"},
 		{Command: "infra destroy", Description: "Tear down infrastructure"},
 	})
 	return nil
 }
 
-func runInfraApply(cmd *cobra.Command, args []string) error {
-	runner, err := infraRunner()
+// InfraApply applies a Terraform plan (runs plan first if no tfplan exists).
+func InfraApply(p InfraParams) error {
+	_, envDir, err := resolveInfraParams(&p)
 	if err != nil {
 		return err
 	}
 
-	envDir, _ := resolveEnvDir()
 	planFile := filepath.Join(envDir, "tfplan")
-
-	if _, err := os.Stat(planFile); os.IsNotExist(err) {
-		fmt.Println("No plan found, running plan first...")
-		if _, err := runner.Run("tofu", "plan", "-var-file=terraform.tfvars", "-out=tfplan"); err != nil {
-			return err
+	if _, statErr := os.Stat(planFile); os.IsNotExist(statErr) {
+		fmt.Fprintln(p.Stdout, "No plan found, running plan first...")
+		if _, planErr := p.Exec.Run("tofu", "plan", "-var-file=terraform.tfvars", "-out=tfplan"); planErr != nil {
+			return planErr
 		}
 	}
 
-	if !autoYes {
-		fmt.Print("\nApply this plan? [y/N] ")
-		var confirm string
-		_, _ = fmt.Scanln(&confirm)
-		if confirm != "y" && confirm != "Y" {
-			fmt.Println("Cancelled.")
-			return nil
-		}
+	if !infraConfirm(p, "Apply this plan?") {
+		fmt.Fprintln(p.Stdout, "Cancelled.")
+		return nil
 	}
 
-	fmt.Println("Applying...")
-	if _, err := runner.Run("tofu", "apply", "tfplan"); err != nil {
-		return err
+	fmt.Fprintln(p.Stdout, "Applying...")
+	if _, applyErr := p.Exec.Run("tofu", "apply", "tfplan"); applyErr != nil {
+		return applyErr
 	}
 
 	_ = os.Remove(planFile)
 
-	fmt.Println("\nOutputs:")
-	_, err = runner.Run("tofu", "output", "-json")
-	if err != nil {
-		return err
+	fmt.Fprintln(p.Stdout, "\nOutputs:")
+	if _, outErr := p.Exec.Run("tofu", "output", "-json"); outErr != nil {
+		return outErr
 	}
-	hints.Print([]hints.NextStep{
+	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "infra kubeconfig", Description: "Fetch kubeconfig from OCI"},
 		{Command: "cluster add oci-dev", Description: "Add cluster to fleet"},
 		{Command: "bootstrap --cluster oci-dev", Description: "Bootstrap FluxCD on cluster"},
@@ -215,56 +208,50 @@ func runInfraApply(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runInfraDestroy(cmd *cobra.Command, args []string) error {
-	runner, err := infraRunner()
-	if err != nil {
+// InfraDestroy destroys all infrastructure.
+func InfraDestroy(p InfraParams) error {
+	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
 	}
 
-	if !autoYes {
-		fmt.Print("\n⚠️  DESTROY all infrastructure? This cannot be undone. [y/N] ")
-		var confirm string
-		_, _ = fmt.Scanln(&confirm)
-		if confirm != "y" {
-			fmt.Println("Cancelled.")
-			return nil
-		}
+	if !infraConfirm(p, "DESTROY all infrastructure? This cannot be undone.") {
+		fmt.Fprintln(p.Stdout, "Cancelled.")
+		return nil
 	}
 
-	_, err = runner.Run("tofu", "destroy", "-var-file=terraform.tfvars")
+	_, err := p.Exec.Run("tofu", "destroy", "-var-file=terraform.tfvars")
 	return err
 }
 
-func runInfraOutput(cmd *cobra.Command, args []string) error {
-	runner, err := infraRunner()
-	if err != nil {
+// InfraOutput shows Terraform outputs.
+func InfraOutput(p InfraParams) error {
+	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
 	}
-	_, err = runner.Run("tofu", "output", "-json")
+	_, err := p.Exec.Run("tofu", "output", "-json")
 	return err
 }
 
-func runInfraKubeconfig(cmd *cobra.Command, args []string) error {
-	runner, err := infraRunner()
+// InfraKubeconfig fetches the kubeconfig from OCI using the cluster_id output.
+func InfraKubeconfig(p InfraParams) error {
+	infraRoot, _, err := resolveInfraParams(&p)
 	if err != nil {
 		return err
 	}
 
-	result, err := runner.RunSilent("tofu", "output", "-raw", "cluster_id")
+	result, err := p.Exec.RunSilent("tofu", "output", "-raw", "cluster_id")
 	if err != nil {
-		return fmt.Errorf("no cluster_id output found — has infra been applied? %w", err)
+		return fmt.Errorf("no cluster_id output found -- has infra been applied? %w", err)
 	}
 
-	cfg, _ := config.Load(cfgFile)
-	region := "us-phoenix-1"
-	if cfg != nil && cfg.OCIRegion != "" {
-		region = cfg.OCIRegion
+	region := p.Region
+	if region == "" {
+		region = "us-phoenix-1"
 	}
 
-	infraRoot, _ := resolveInfraDir()
 	kubeconfigPath := filepath.Join(infraRoot, "kubeconfig")
 
-	_, err = runner.Run("oci", "ce", "cluster", "create-kubeconfig",
+	_, err = p.Exec.Run("oci", "ce", "cluster", "create-kubeconfig",
 		"--cluster-id", strings.TrimSpace(result.Stdout),
 		"--file", kubeconfigPath,
 		"--region", region,
@@ -276,11 +263,95 @@ func runInfraKubeconfig(cmd *cobra.Command, args []string) error {
 	}
 
 	_ = os.Chmod(kubeconfigPath, 0600)
-	fmt.Printf("Kubeconfig saved to %s\n", kubeconfigPath)
-	hints.Print([]hints.NextStep{
+	fmt.Fprintf(p.Stdout, "Kubeconfig saved to %s\n", kubeconfigPath)
+	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "cluster add oci-dev", Description: "Add cluster to fleet"},
 		{Command: "secrets init --cluster oci-dev", Description: "Bootstrap secrets"},
 		{Command: "bootstrap --cluster oci-dev", Description: "Bootstrap FluxCD"},
 	})
 	return nil
+}
+
+// buildInfraParams constructs InfraParams from global Cobra flags.
+func buildInfraParams() (InfraParams, error) {
+	cfg, _ := config.Load(cfgFile)
+	pr := paths.NewWithHome("", cfg)
+	// If home is empty, use the real home directory.
+	if pr.HomeDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return InfraParams{}, err
+		}
+		pr.HomeDir = home
+	}
+
+	region := "us-phoenix-1"
+	if cfg != nil && cfg.OCIRegion != "" {
+		region = cfg.OCIRegion
+	}
+
+	return InfraParams{
+		Exec:    exec.NewRunner(),
+		Paths:   pr,
+		Stdout:  os.Stdout,
+		Env:     infraEnv,
+		Dir:     infraDir,
+		CfgFile: cfgFile,
+		DryRun:  dryRun,
+		Verbose: verbose,
+		AutoYes: autoYes,
+		ConfirmFunc: func(prompt string) bool {
+			return confirm(prompt)
+		},
+		TokenResolverFunc: cloudflare.ResolveToken,
+		Region:            region,
+	}, nil
+}
+
+func runInfraInit(_ *cobra.Command, _ []string) error {
+	p, err := buildInfraParams()
+	if err != nil {
+		return err
+	}
+	return InfraInit(p)
+}
+
+func runInfraPlan(_ *cobra.Command, _ []string) error {
+	p, err := buildInfraParams()
+	if err != nil {
+		return err
+	}
+	return InfraPlan(p)
+}
+
+func runInfraApply(_ *cobra.Command, _ []string) error {
+	p, err := buildInfraParams()
+	if err != nil {
+		return err
+	}
+	return InfraApply(p)
+}
+
+func runInfraDestroy(_ *cobra.Command, _ []string) error {
+	p, err := buildInfraParams()
+	if err != nil {
+		return err
+	}
+	return InfraDestroy(p)
+}
+
+func runInfraOutput(_ *cobra.Command, _ []string) error {
+	p, err := buildInfraParams()
+	if err != nil {
+		return err
+	}
+	return InfraOutput(p)
+}
+
+func runInfraKubeconfig(_ *cobra.Command, _ []string) error {
+	p, err := buildInfraParams()
+	if err != nil {
+		return err
+	}
+	return InfraKubeconfig(p)
 }

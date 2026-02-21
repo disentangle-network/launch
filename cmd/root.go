@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"io"
+	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -35,6 +39,12 @@ func versionInfo() string {
 		return "dev (unknown commit)"
 	}
 
+	return versionFromBuildInfo(info)
+}
+
+// versionFromBuildInfo extracts a version string from debug.BuildInfo.
+// Separated from versionInfo for testability.
+func versionFromBuildInfo(info *debug.BuildInfo) string {
 	// `go install module@vX.Y.Z` embeds the module version in Main.Version.
 	if info.Main.Version != "" && info.Main.Version != "(devel)" {
 		return info.Main.Version
@@ -106,11 +116,20 @@ func init() {
 }
 
 func confirm(prompt string) bool {
+	return confirmReader(prompt, os.Stdin)
+}
+
+// confirmReader reads a yes/no response from the given reader.
+// Separated from confirm for testability.
+func confirmReader(prompt string, r io.Reader) bool {
 	if autoYes {
 		return true
 	}
 	fmt.Printf("%s [y/N]: ", prompt)
-	var response string
-	_, _ = fmt.Scanln(&response)
+	scanner := bufio.NewScanner(r)
+	if !scanner.Scan() {
+		return false
+	}
+	response := strings.TrimSpace(scanner.Text())
 	return response == "y" || response == "Y" || response == "yes"
 }

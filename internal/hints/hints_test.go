@@ -7,6 +7,36 @@ import (
 	"testing"
 )
 
+func TestFprintEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	Fprint(&buf, nil)
+	if buf.String() != "" {
+		t.Errorf("Fprint(nil) should produce no output, got %q", buf.String())
+	}
+}
+
+func TestFprintSteps(t *testing.T) {
+	var buf bytes.Buffer
+	Fprint(&buf, []NextStep{
+		{Command: "infra plan", Description: "Preview changes"},
+		{Command: "cluster add dev", Description: "Register cluster"},
+	})
+	output := buf.String()
+
+	if !strings.Contains(output, "Next steps") {
+		t.Error("output should contain 'Next steps' header")
+	}
+	if !strings.Contains(output, "launch-disentangle infra plan") {
+		t.Error("output should contain 'launch-disentangle infra plan'")
+	}
+	if !strings.Contains(output, "Preview changes") {
+		t.Error("output should contain description")
+	}
+	if !strings.Contains(output, "launch-disentangle cluster add dev") {
+		t.Error("output should contain second command")
+	}
+}
+
 func TestPrintEmpty(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
@@ -46,12 +76,6 @@ func TestPrintSteps(t *testing.T) {
 	}
 	if !strings.Contains(output, "launch-disentangle infra plan") {
 		t.Error("output should contain 'launch-disentangle infra plan'")
-	}
-	if !strings.Contains(output, "Preview changes") {
-		t.Error("output should contain description")
-	}
-	if !strings.Contains(output, "launch-disentangle cluster add dev") {
-		t.Error("output should contain second command")
 	}
 }
 

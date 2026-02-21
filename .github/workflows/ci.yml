@@ -24,6 +24,8 @@ jobs:
             gofmt -l .
             exit 1
           fi
+      - name: go vet
+        run: go vet ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
@@ -42,6 +44,22 @@ jobs:
           git diff --exit-code go.mod go.sum
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Check golden file drift
+        run: |
+          go test ./internal/fleet/... 2>/dev/null
+          if ! git diff --quiet -- '**/testdata/golden/**'; then
+            echo "Golden files are out of date. Run: LAUNCH_UPDATE_GOLDEN=1 go test ./internal/fleet/..."
+            git diff -- '**/testdata/golden/**'
+            exit 1
+          fi
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $NF}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          if [ "$(echo "$COVERAGE < 90" | bc -l)" -eq 1 ]; then
+            echo "Coverage ${COVERAGE}% is below 90% threshold"
+            exit 1
+          fi
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:

@@ -15,18 +15,21 @@ type CredentialCheck struct {
 	Detail string
 }
 
-func CheckCredentials() []CredentialCheck {
+// CheckCredentials runs all credential checks using the given executor for
+// any commands that need to shell out.  checkAgeKey does not need an executor
+// (it only checks the filesystem).
+func CheckCredentials(e exec.Executor) []CredentialCheck {
 	var results []CredentialCheck
 
-	results = append(results, checkOCI())
-	results = append(results, checkCloudflare())
-	results = append(results, checkGitHub())
+	results = append(results, checkOCI(e))
+	results = append(results, checkCloudflare(e))
+	results = append(results, checkGitHub(e))
 	results = append(results, checkAgeKey())
 
 	return results
 }
 
-func checkOCI() CredentialCheck {
+func checkOCI(e exec.Executor) CredentialCheck {
 	result := CredentialCheck{Name: "OCI API Key"}
 
 	// Check if ~/.oci/config exists
@@ -44,8 +47,7 @@ func checkOCI() CredentialCheck {
 	}
 
 	// Validate with API call
-	runner := exec.NewRunner()
-	out, err := runner.RunSilent("oci", "iam", "region", "list", "--output", "json")
+	out, err := e.RunSilent("oci", "iam", "region", "list", "--output", "json")
 	if err != nil {
 		result.Status = "invalid"
 		result.Detail = fmt.Sprintf("OCI API call failed: %s", strings.TrimSpace(out.Stderr))
@@ -57,7 +59,7 @@ func checkOCI() CredentialCheck {
 	return result
 }
 
-func checkCloudflare() CredentialCheck {
+func checkCloudflare(e exec.Executor) CredentialCheck {
 	result := CredentialCheck{Name: "Cloudflare API Token"}
 
 	token, source, err := cloudflare.ResolveToken()
@@ -70,13 +72,12 @@ func checkCloudflare() CredentialCheck {
 	// Validate the resolved token against the Cloudflare API.
 	// Try /user/tokens/verify first (works for API tokens), then fall back
 	// to /zones (works for both API tokens and wrangler OAuth tokens).
-	runner := exec.NewRunner()
 	endpoints := []string{
 		"https://api.cloudflare.com/client/v4/user/tokens/verify",
 		"https://api.cloudflare.com/client/v4/zones?per_page=1",
 	}
 	for _, endpoint := range endpoints {
-		out, curlErr := runner.RunSilent("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+		out, curlErr := e.RunSilent("curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
 			"-H", "Authorization: Bearer "+token, endpoint)
 		if curlErr != nil {
 			continue
@@ -92,11 +93,10 @@ func checkCloudflare() CredentialCheck {
 	return result
 }
 
-func checkGitHub() CredentialCheck {
+func checkGitHub(e exec.Executor) CredentialCheck {
 	result := CredentialCheck{Name: "GitHub CLI"}
 
-	runner := exec.NewRunner()
-	out, err := runner.RunSilent("gh", "auth", "status")
+	out, err := e.RunSilent("gh", "auth", "status")
 	if err != nil {
 		result.Status = "invalid"
 		result.Detail = fmt.Sprintf("gh auth failed: %s", strings.TrimSpace(out.Stderr))

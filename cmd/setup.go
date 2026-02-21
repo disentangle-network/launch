@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -10,8 +11,18 @@ import (
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
+	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
 )
+
+// SetupParams holds dependencies for the setup command.
+type SetupParams struct {
+	Exec        exec.Executor
+	Paths       *paths.Resolver
+	Stdout      io.Writer
+	CfgFile     string
+	ConfirmFunc func(string) bool
+}
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -27,154 +38,169 @@ func init() {
 
 func runSetup(cmd *cobra.Command, args []string) error {
 	runner := exec.NewRunner()
-	cfg, err := config.Load(cfgFile)
+	runner.Verbose = verbose
+	runner.DryRun = dryRun
+
+	resolver, err := paths.New(nil)
+	if err != nil {
+		return fmt.Errorf("resolving paths: %w", err)
+	}
+
+	return Setup(SetupParams{
+		Exec:        runner,
+		Paths:       resolver,
+		Stdout:      os.Stdout,
+		CfgFile:     cfgFile,
+		ConfirmFunc: confirm,
+	})
+}
+
+// Setup interactively configures credentials for the deployment pipeline.
+func Setup(p SetupParams) error {
+	cfg, err := config.Load(p.CfgFile)
 	if err != nil {
 		cfg = &config.Config{}
 	}
 	configChanged := false
 
-	fmt.Println("==> Credential Setup")
-	fmt.Println()
+	fmt.Fprintln(p.Stdout, "==> Credential Setup")
+	fmt.Fprintln(p.Stdout)
 
 	// 1. OCI CLI
-	fmt.Println("--- OCI CLI ---")
-	if _, err := runner.RunSilent("oci", "iam", "region", "list", "--output", "json"); err == nil {
-		fmt.Println("  OCI CLI configured and authenticated.")
+	fmt.Fprintln(p.Stdout, "--- OCI CLI ---")
+	if _, err := p.Exec.RunSilent("oci", "iam", "region", "list", "--output", "json"); err == nil {
+		fmt.Fprintln(p.Stdout, "  OCI CLI configured and authenticated.")
 		// Auto-discover compartment ID if not set
 		if cfg.OCICompartmentID == "" {
-			if out, err := runner.RunSilent("oci", "iam", "compartment", "list",
+			if out, err := p.Exec.RunSilent("oci", "iam", "compartment", "list",
 				"--query", "data[0].\"compartment-id\"", "--raw-output"); err == nil {
 				tenancy := strings.TrimSpace(out.Stdout)
 				if tenancy != "" {
 					cfg.OCICompartmentID = tenancy
 					configChanged = true
-					fmt.Printf("  Auto-detected tenancy: %s\n", tenancy)
+					fmt.Fprintf(p.Stdout, "  Auto-detected tenancy: %s\n", tenancy)
 				}
 			}
 		}
 	} else {
-		fmt.Println("  OCI CLI not configured.")
-		if confirm("Run 'oci setup config' to configure OCI credentials?") {
-			if _, err := runner.Run("oci", "setup", "config"); err != nil {
-				fmt.Printf("  WARNING: oci setup config failed: %v\n", err)
+		fmt.Fprintln(p.Stdout, "  OCI CLI not configured.")
+		if p.ConfirmFunc("Run 'oci setup config' to configure OCI credentials?") {
+			if _, err := p.Exec.Run("oci", "setup", "config"); err != nil {
+				fmt.Fprintf(p.Stdout, "  WARNING: oci setup config failed: %v\n", err)
 			}
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(p.Stdout)
 
 	// 2. Cloudflare via wrangler
-	fmt.Println("--- Cloudflare ---")
+	fmt.Fprintln(p.Stdout, "--- Cloudflare ---")
 	if token, source, err := cloudflare.ResolveToken(); err == nil {
-		fmt.Printf("  Cloudflare token resolved via %s.\n", source)
+		fmt.Fprintf(p.Stdout, "  Cloudflare token resolved via %s.\n", source)
 		_ = token // token is used at runtime, not persisted
 		// Extract account ID if not already set
 		if cfg.CloudflareAccountID == "" {
 			if acctID := cloudflare.ResolveAccountID(); acctID != "" {
 				cfg.CloudflareAccountID = acctID
 				configChanged = true
-				fmt.Printf("  Auto-detected account ID: %s\n", acctID)
+				fmt.Fprintf(p.Stdout, "  Auto-detected account ID: %s\n", acctID)
 			}
 		} else {
-			fmt.Printf("  Account ID: %s\n", cfg.CloudflareAccountID)
+			fmt.Fprintf(p.Stdout, "  Account ID: %s\n", cfg.CloudflareAccountID)
 		}
 	} else if exec.CommandExists("wrangler") {
-		fmt.Println("  Wrangler installed but not authenticated.")
-		if confirm("Run 'wrangler login' to authenticate with Cloudflare?") {
-			if _, err := runner.Run("wrangler", "login"); err != nil {
-				fmt.Printf("  WARNING: wrangler login failed: %v\n", err)
+		fmt.Fprintln(p.Stdout, "  Wrangler installed but not authenticated.")
+		if p.ConfirmFunc("Run 'wrangler login' to authenticate with Cloudflare?") {
+			if _, err := p.Exec.Run("wrangler", "login"); err != nil {
+				fmt.Fprintf(p.Stdout, "  WARNING: wrangler login failed: %v\n", err)
 			}
 		}
 	} else {
-		fmt.Println("  Cloudflare not configured: " + err.Error())
-		fmt.Println("  Install wrangler: npm install -g wrangler")
+		fmt.Fprintln(p.Stdout, "  Cloudflare not configured: "+err.Error())
+		fmt.Fprintln(p.Stdout, "  Install wrangler: npm install -g wrangler")
 	}
-	fmt.Println()
+	fmt.Fprintln(p.Stdout)
 
 	// 3. GitHub CLI
-	fmt.Println("--- GitHub CLI ---")
-	if out, err := runner.RunSilent("gh", "auth", "status"); err == nil {
+	fmt.Fprintln(p.Stdout, "--- GitHub CLI ---")
+	if out, err := p.Exec.RunSilent("gh", "auth", "status"); err == nil {
 		output := out.Stdout + out.Stderr
 		for _, line := range strings.Split(output, "\n") {
 			if strings.Contains(line, "Logged in") {
-				fmt.Printf("  %s\n", strings.TrimSpace(line))
+				fmt.Fprintf(p.Stdout, "  %s\n", strings.TrimSpace(line))
 			}
 		}
 		if !strings.Contains(output, "repo") {
-			fmt.Println("  WARNING: 'repo' scope may be missing. FluxCD bootstrap requires it.")
-			fmt.Println("  Run: gh auth refresh -s repo")
+			fmt.Fprintln(p.Stdout, "  WARNING: 'repo' scope may be missing. FluxCD bootstrap requires it.")
+			fmt.Fprintln(p.Stdout, "  Run: gh auth refresh -s repo")
 		}
 	} else {
-		fmt.Println("  GitHub CLI not authenticated.")
-		if confirm("Run 'gh auth login' to authenticate?") {
-			if _, err := runner.Run("gh", "auth", "login"); err != nil {
-				fmt.Printf("  WARNING: gh auth login failed: %v\n", err)
+		fmt.Fprintln(p.Stdout, "  GitHub CLI not authenticated.")
+		if p.ConfirmFunc("Run 'gh auth login' to authenticate?") {
+			if _, err := p.Exec.Run("gh", "auth", "login"); err != nil {
+				fmt.Fprintf(p.Stdout, "  WARNING: gh auth login failed: %v\n", err)
 			}
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(p.Stdout)
 
 	// 4. SOPS Age Key
-	fmt.Println("--- SOPS Age Key ---")
-	keyFile := os.Getenv("SOPS_AGE_KEY_FILE")
-	if keyFile == "" {
-		home, _ := os.UserHomeDir()
-		keyFile = home + "/.config/sops/age/keys.txt"
-	}
+	fmt.Fprintln(p.Stdout, "--- SOPS Age Key ---")
+	keyFile := p.Paths.AgeKeyFile()
 	if _, err := os.Stat(keyFile); err == nil {
-		fmt.Printf("  Age key found at %s\n", keyFile)
+		fmt.Fprintf(p.Stdout, "  Age key found at %s\n", keyFile)
 	} else {
-		fmt.Printf("  No age key at %s\n", keyFile)
+		fmt.Fprintf(p.Stdout, "  No age key at %s\n", keyFile)
 		if exec.CommandExists("age-keygen") {
-			if confirm("Generate a new age key?") {
+			if p.ConfirmFunc("Generate a new age key?") {
 				if err := os.MkdirAll(keyFile[:strings.LastIndex(keyFile, "/")], 0o700); err != nil {
 					return fmt.Errorf("creating key directory: %w", err)
 				}
-				if _, err := runner.Run("sh", "-c", "age-keygen -o "+keyFile); err != nil {
-					fmt.Printf("  WARNING: age-keygen failed: %v\n", err)
+				if _, err := p.Exec.Run("sh", "-c", "age-keygen -o "+keyFile); err != nil {
+					fmt.Fprintf(p.Stdout, "  WARNING: age-keygen failed: %v\n", err)
 				} else {
-					fmt.Printf("  Age key generated at %s\n", keyFile)
+					fmt.Fprintf(p.Stdout, "  Age key generated at %s\n", keyFile)
 				}
 			}
 		} else {
-			fmt.Println("  Install age: brew install age")
+			fmt.Fprintln(p.Stdout, "  Install age: brew install age")
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(p.Stdout)
 
 	// 5. OCI Vault -- auto-discover and configure
-	fmt.Println("--- OCI Vault ---")
+	fmt.Fprintln(p.Stdout, "--- OCI Vault ---")
 	if cfg.OCIVaultKeyOCID != "" {
-		fmt.Printf("  Vault key configured: ...%s\n", cfg.OCIVaultKeyOCID[max(0, len(cfg.OCIVaultKeyOCID)-20):])
+		fmt.Fprintf(p.Stdout, "  Vault key configured: ...%s\n", cfg.OCIVaultKeyOCID[max(0, len(cfg.OCIVaultKeyOCID)-20):])
 	} else if exec.CommandExists("oci") && cfg.OCICompartmentID != "" {
-		fmt.Println("  Discovering OCI vaults...")
-		if err := discoverVault(runner, cfg); err != nil {
-			fmt.Printf("  Could not auto-discover vault: %v\n", err)
-			fmt.Println("  To provision manually:")
-			fmt.Println("    oci kms management vault create --compartment-id <OCID> \\")
-			fmt.Println("      --display-name launch-vault --vault-type DEFAULT")
+		fmt.Fprintln(p.Stdout, "  Discovering OCI vaults...")
+		if err := discoverVault(p.Exec, p.Stdout, p.ConfirmFunc, cfg); err != nil {
+			fmt.Fprintf(p.Stdout, "  Could not auto-discover vault: %v\n", err)
+			fmt.Fprintln(p.Stdout, "  To provision manually:")
+			fmt.Fprintln(p.Stdout, "    oci kms management vault create --compartment-id <OCID> \\")
+			fmt.Fprintln(p.Stdout, "      --display-name launch-vault --vault-type DEFAULT")
 		} else if cfg.OCIVaultKeyOCID != "" {
 			configChanged = true
 		}
 	} else {
-		fmt.Println("  OCI CLI not available or compartment not set; skipping vault discovery.")
+		fmt.Fprintln(p.Stdout, "  OCI CLI not available or compartment not set; skipping vault discovery.")
 	}
-	fmt.Println()
+	fmt.Fprintln(p.Stdout)
 
 	// Save config if anything changed
 	if configChanged {
-		if err := config.Save(cfg, cfgFile); err != nil {
-			fmt.Printf("  WARNING: could not save config: %v\n", err)
+		if err := config.Save(cfg, p.CfgFile); err != nil {
+			fmt.Fprintf(p.Stdout, "  WARNING: could not save config: %v\n", err)
 		} else {
-			path := cfgFile
+			path := p.CfgFile
 			if path == "" {
 				path, _ = config.DefaultConfigPath()
 			}
-			fmt.Printf("==> Config saved to %s\n\n", path)
+			fmt.Fprintf(p.Stdout, "==> Config saved to %s\n\n", path)
 		}
 	}
 
-	fmt.Println("Setup complete.")
-	hints.Print([]hints.NextStep{
+	fmt.Fprintln(p.Stdout, "Setup complete.")
+	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "preflight", Description: "Verify all tools and credentials"},
 		{Command: "infra plan", Description: "Preview OCI infrastructure"},
 	})
@@ -183,9 +209,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 
 // discoverVault finds existing OCI vaults and keys, prompts for selection if
 // multiple exist, and populates the config.
-func discoverVault(runner *exec.Runner, cfg *config.Config) error {
+func discoverVault(e exec.Executor, w io.Writer, confirmFn func(string) bool, cfg *config.Config) error {
 	// List vaults
-	out, err := runner.RunSilent("oci", "kms", "management", "vault", "list",
+	out, err := e.RunSilent("oci", "kms", "management", "vault", "list",
 		"--all", "--compartment-id", cfg.OCICompartmentID,
 		"--output", "json",
 		"--query", `data[?\"lifecycle-state\"=='ACTIVE']`)
@@ -203,9 +229,9 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 	}
 
 	if len(vaults) == 0 {
-		fmt.Println("  No active vaults found.")
-		if confirm("Create a new vault named 'launch-vault'?") {
-			createOut, err := runner.RunSilent("oci", "kms", "management", "vault", "create",
+		fmt.Fprintln(w, "  No active vaults found.")
+		if confirmFn("Create a new vault named 'launch-vault'?") {
+			createOut, err := e.RunSilent("oci", "kms", "management", "vault", "create",
 				"--compartment-id", cfg.OCICompartmentID,
 				"--display-name", "launch-vault",
 				"--vault-type", "DEFAULT",
@@ -232,7 +258,7 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 				DisplayName:        "launch-vault",
 				ManagementEndpoint: created.Data.ManagementEndpoint,
 			})
-			fmt.Println("  Vault created.")
+			fmt.Fprintln(w, "  Vault created.")
 		} else {
 			return nil
 		}
@@ -241,20 +267,20 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 	// Select vault (use first if only one)
 	vault := vaults[0]
 	if len(vaults) > 1 {
-		fmt.Println("  Available vaults:")
+		fmt.Fprintln(w, "  Available vaults:")
 		for i, v := range vaults {
-			fmt.Printf("    [%d] %s (%s)\n", i+1, v.DisplayName, v.ID[len(v.ID)-20:])
+			fmt.Fprintf(w, "    [%d] %s (%s)\n", i+1, v.DisplayName, v.ID[len(v.ID)-20:])
 		}
-		fmt.Printf("  Using vault: %s\n", vault.DisplayName)
+		fmt.Fprintf(w, "  Using vault: %s\n", vault.DisplayName)
 	} else {
-		fmt.Printf("  Found vault: %s\n", vault.DisplayName)
+		fmt.Fprintf(w, "  Found vault: %s\n", vault.DisplayName)
 	}
 
 	cfg.OCIVaultID = vault.ID
 	cfg.OCIVaultEndpoint = vault.ManagementEndpoint
 
 	// List keys in the vault
-	keyOut, err := runner.RunSilent("oci", "kms", "management", "key", "list",
+	keyOut, err := e.RunSilent("oci", "kms", "management", "key", "list",
 		"--all", "--compartment-id", cfg.OCICompartmentID,
 		"--endpoint", vault.ManagementEndpoint,
 		"--output", "json",
@@ -273,9 +299,9 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 	}
 
 	if len(keys) == 0 {
-		fmt.Println("  No enabled keys found in vault.")
-		if confirm("Create a new AES-256 master key named 'launch-key'?") {
-			createKeyOut, err := runner.RunSilent("oci", "kms", "management", "key", "create",
+		fmt.Fprintln(w, "  No enabled keys found in vault.")
+		if confirmFn("Create a new AES-256 master key named 'launch-key'?") {
+			createKeyOut, err := e.RunSilent("oci", "kms", "management", "key", "create",
 				"--compartment-id", cfg.OCICompartmentID,
 				"--endpoint", vault.ManagementEndpoint,
 				"--display-name", "launch-key",
@@ -294,7 +320,7 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 				return fmt.Errorf("parsing created key: %w", err)
 			}
 			cfg.OCIVaultKeyOCID = createdKey.Data.ID
-			fmt.Printf("  Key created: %s\n", createdKey.Data.ID)
+			fmt.Fprintf(w, "  Key created: %s\n", createdKey.Data.ID)
 		}
 		return nil
 	}
@@ -302,16 +328,16 @@ func discoverVault(runner *exec.Runner, cfg *config.Config) error {
 	// Select key (use first if only one)
 	key := keys[0]
 	if len(keys) > 1 {
-		fmt.Println("  Available keys:")
+		fmt.Fprintln(w, "  Available keys:")
 		for i, k := range keys {
-			fmt.Printf("    [%d] %s (%s, %s)\n", i+1, k.DisplayName, k.Algorithm, k.ID[len(k.ID)-20:])
+			fmt.Fprintf(w, "    [%d] %s (%s, %s)\n", i+1, k.DisplayName, k.Algorithm, k.ID[len(k.ID)-20:])
 		}
-		fmt.Printf("  Using key: %s\n", key.DisplayName)
+		fmt.Fprintf(w, "  Using key: %s\n", key.DisplayName)
 	} else {
-		fmt.Printf("  Found key: %s (%s)\n", key.DisplayName, key.Algorithm)
+		fmt.Fprintf(w, "  Found key: %s (%s)\n", key.DisplayName, key.Algorithm)
 	}
 
 	cfg.OCIVaultKeyOCID = key.ID
-	fmt.Printf("  Vault key OCID saved to config.\n")
+	fmt.Fprintf(w, "  Vault key OCID saved to config.\n")
 	return nil
 }

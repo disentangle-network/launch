@@ -140,6 +140,15 @@ func (r *Runner) buildEnv() []string {
 	return append(env, r.Env...)
 }
 
+// SetDir sets the working directory for subsequent commands.
+func (r *Runner) SetDir(dir string) { r.Dir = dir }
+
+// SetEnv sets environment variables for subsequent commands.
+func (r *Runner) SetEnv(env []string) { r.Env = env }
+
+// GetDir returns the current working directory.
+func (r *Runner) GetDir() string { return r.Dir }
+
 // CommandExists checks if a command is available in PATH.
 func CommandExists(name string) bool {
 	_, err := exec.LookPath(name)

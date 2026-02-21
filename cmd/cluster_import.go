@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
+	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -39,29 +41,30 @@ func init() {
 	clusterImportCmd.Flags().StringVar(&importContext, "context", "", "Rename the imported context (default: keep source context name)")
 }
 
-func runClusterImport(cmd *cobra.Command, args []string) error {
-	group := args[0]
-	sourcePath := args[1]
+// ClusterImportParams holds all dependencies for ClusterImport.
+type ClusterImportParams struct {
+	Exec       exec.Executor
+	Paths      *paths.Resolver
+	Stdout     io.Writer
+	Group      string
+	SourcePath string
+	Context    string
+}
 
-	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-		return fmt.Errorf("kubeconfig not found: %s", sourcePath)
+// ClusterImport imports a kubeconfig into a group-specific config file.
+func ClusterImport(p ClusterImportParams) error {
+	if _, err := os.Stat(p.SourcePath); os.IsNotExist(err) {
+		return fmt.Errorf("kubeconfig not found: %s", p.SourcePath)
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("could not determine home directory: %w", err)
-	}
-
-	groupDir := filepath.Join(home, ".kube", group)
+	groupDir := p.Paths.KubeGroupDir(p.Group)
 	if err := os.MkdirAll(groupDir, 0755); err != nil {
 		return fmt.Errorf("failed to create %s: %w", groupDir, err)
 	}
-	targetPath := filepath.Join(groupDir, "config")
-
-	runner := exec.NewRunner()
+	targetPath := p.Paths.KubeGroupConfig(p.Group)
 
 	// Detect source context
-	result, err := runner.RunSilent("kubectl", "config", "current-context", "--kubeconfig", sourcePath)
+	result, err := p.Exec.RunSilent("kubectl", "config", "current-context", "--kubeconfig", p.SourcePath)
 	if err != nil {
 		return fmt.Errorf("could not determine source context: %w", err)
 	}
@@ -69,45 +72,44 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 
 	// Determine final context name
 	finalCtx := sourceCtx
-	if importContext != "" {
-		finalCtx = importContext
+	if p.Context != "" {
+		finalCtx = p.Context
 	}
 
-	fmt.Printf("Importing from %s (context: %s)\n", sourcePath, sourceCtx)
+	fmt.Fprintf(p.Stdout, "Importing from %s (context: %s)\n", p.SourcePath, sourceCtx)
 
 	// If renaming, work on a temp copy to avoid mutating the source
-	importPath := sourcePath
+	importPath := p.SourcePath
 	if finalCtx != sourceCtx {
 		tmpFile, err := os.CreateTemp("", "launch-kubeconfig-*.yaml")
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		defer os.Remove(tmpFile.Name())
+		defer func() { _ = os.Remove(tmpFile.Name()) }()
 
-		data, err := os.ReadFile(sourcePath)
+		data, err := os.ReadFile(p.SourcePath)
 		if err != nil {
-			return fmt.Errorf("failed to read %s: %w", sourcePath, err)
+			return fmt.Errorf("failed to read %s: %w", p.SourcePath, err)
 		}
 		if _, err := tmpFile.Write(data); err != nil {
-			tmpFile.Close()
+			_ = tmpFile.Close()
 			return fmt.Errorf("failed to write temp file: %w", err)
 		}
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		importPath = tmpFile.Name()
 
-		fmt.Printf("Renaming context '%s' → '%s'\n", sourceCtx, finalCtx)
-		if _, err := runner.RunSilent("kubectl", "config", "rename-context", sourceCtx, finalCtx, "--kubeconfig", importPath); err != nil {
+		fmt.Fprintf(p.Stdout, "Renaming context '%s' → '%s'\n", sourceCtx, finalCtx)
+		if _, err := p.Exec.RunSilent("kubectl", "config", "rename-context", sourceCtx, finalCtx, "--kubeconfig", importPath); err != nil {
 			return fmt.Errorf("failed to rename context: %w", err)
 		}
 	}
 
 	// Merge or create
 	if info, err := os.Stat(targetPath); err == nil && info.Size() > 0 {
-		mergeRunner := exec.NewRunner()
-		mergeRunner.Env = []string{
+		p.Exec.SetEnv([]string{
 			fmt.Sprintf("KUBECONFIG=%s:%s", targetPath, importPath),
-		}
-		result, err := mergeRunner.RunSilent("kubectl", "config", "view", "--flatten")
+		})
+		result, err := p.Exec.RunSilent("kubectl", "config", "view", "--flatten")
 		if err != nil {
 			return fmt.Errorf("merge failed: %w", err)
 		}
@@ -118,6 +120,8 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(targetPath, []byte(merged), 0600); err != nil {
 			return fmt.Errorf("failed to write merged config: %w", err)
 		}
+		// Clear the env override
+		p.Exec.SetEnv(nil)
 	} else {
 		data, err := os.ReadFile(importPath)
 		if err != nil {
@@ -129,23 +133,41 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set the imported context as current
-	if _, err := runner.RunSilent("kubectl", "config", "use-context", finalCtx, "--kubeconfig", targetPath); err != nil {
-		fmt.Printf("Warning: could not set current context: %v\n", err)
+	if _, err := p.Exec.RunSilent("kubectl", "config", "use-context", finalCtx, "--kubeconfig", targetPath); err != nil {
+		fmt.Fprintf(p.Stdout, "Warning: could not set current context: %v\n", err)
 	}
 
 	// Show what's in the group now
-	ctxResult, _ := runner.RunSilent("kubectl", "config", "get-contexts", "-o", "name", "--kubeconfig", targetPath)
+	ctxResult, _ := p.Exec.RunSilent("kubectl", "config", "get-contexts", "-o", "name", "--kubeconfig", targetPath)
 	contexts := strings.TrimSpace(ctxResult.Stdout)
 
-	fmt.Printf("\nGroup '%s' → %s\n", group, targetPath)
-	fmt.Printf("Contexts: %s\n", strings.ReplaceAll(contexts, "\n", ", "))
-	fmt.Printf("\nTo use: export KUBECONFIG=%s\n", targetPath)
+	fmt.Fprintf(p.Stdout, "\nGroup '%s' → %s\n", p.Group, targetPath)
+	fmt.Fprintf(p.Stdout, "Contexts: %s\n", strings.ReplaceAll(contexts, "\n", ", "))
+	fmt.Fprintf(p.Stdout, "\nTo use: export KUBECONFIG=%s\n", targetPath)
 
-	hints.Print([]hints.NextStep{
-		{Command: fmt.Sprintf("cluster add %s", group), Description: "Generate fleet overlays"},
-		{Command: fmt.Sprintf("secrets init --cluster %s", group), Description: "Bootstrap SOPS secrets"},
-		{Command: fmt.Sprintf("bootstrap --cluster %s", group), Description: "Bootstrap FluxCD"},
+	hints.Fprint(p.Stdout, []hints.NextStep{
+		{Command: fmt.Sprintf("cluster add %s", p.Group), Description: "Generate fleet overlays"},
+		{Command: fmt.Sprintf("secrets init --cluster %s", p.Group), Description: "Bootstrap SOPS secrets"},
+		{Command: fmt.Sprintf("bootstrap --cluster %s", p.Group), Description: "Bootstrap FluxCD"},
 	})
 
 	return nil
+}
+
+func runClusterImport(cmd *cobra.Command, args []string) error {
+	runner := exec.NewRunner()
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return ClusterImport(ClusterImportParams{
+		Exec:       runner,
+		Paths:      p,
+		Stdout:     os.Stdout,
+		Group:      args[0],
+		SourcePath: args[1],
+		Context:    importContext,
+	})
 }
