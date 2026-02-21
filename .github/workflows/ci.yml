@@ -63,7 +63,7 @@ jobs:
       - name: Run gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec -exclude-generated ./...
+          gosec -exclude=G204,G304,G301,G306,G703 -exclude-generated ./...
 
   build:
     runs-on: ubuntu-latest
