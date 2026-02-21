@@ -68,7 +68,9 @@ func Setup(p SetupParams) error {
 
 	// 1. OCI CLI
 	fmt.Fprintln(p.Stdout, "--- OCI CLI ---")
+	ociAvailable := false
 	if _, err := p.Exec.RunSilent("oci", "iam", "region", "list", "--output", "json"); err == nil {
+		ociAvailable = true
 		fmt.Fprintln(p.Stdout, "  OCI CLI configured and authenticated.")
 		// Auto-discover compartment ID if not set
 		if cfg.OCICompartmentID == "" {
@@ -171,7 +173,7 @@ func Setup(p SetupParams) error {
 	fmt.Fprintln(p.Stdout, "--- OCI Vault ---")
 	if cfg.OCIVaultKeyOCID != "" {
 		fmt.Fprintf(p.Stdout, "  Vault key configured: ...%s\n", cfg.OCIVaultKeyOCID[max(0, len(cfg.OCIVaultKeyOCID)-20):])
-	} else if exec.CommandExists("oci") && cfg.OCICompartmentID != "" {
+	} else if ociAvailable && cfg.OCICompartmentID != "" {
 		fmt.Fprintln(p.Stdout, "  Discovering OCI vaults...")
 		if err := discoverVault(p.Exec, p.Stdout, p.ConfirmFunc, cfg); err != nil {
 			fmt.Fprintf(p.Stdout, "  Could not auto-discover vault: %v\n", err)
