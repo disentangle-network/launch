@@ -44,9 +44,11 @@ brews:
       owner: disentangle-network
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
     homepage: https://github.com/disentangle-network/launch
     description: Deployment orchestrator for the Disentangle Network
     license: Apache-2.0
+    skip_upload: auto
     install: |
       bin.install "launch"
     test: |
