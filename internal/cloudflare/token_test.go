@@ -32,8 +32,8 @@ func TestResolveTokenFromConfigWithValue(t *testing.T) {
 	if token != "my-token" {
 		t.Errorf("token = %q, want %q", token, "my-token")
 	}
-	if source != "launch config" {
-		t.Errorf("source = %q, want %q", source, "launch config")
+	if source != "launch-disentangle config" {
+		t.Errorf("source = %q, want %q", source, "launch-disentangle config")
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 // ResolveTokenFromConfig checks the launch config first.
 func ResolveTokenFromConfig(cfgToken string) (token string, source string, err error) {
 	if cfgToken != "" {
-		return cfgToken, "launch config", nil
+		return cfgToken, "launch-disentangle config", nil
 	}
 	return ResolveToken()
 }

@@ -73,9 +73,9 @@ func versionInfo() string {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "launch",
+	Use:   "launch-disentangle",
 	Short: "Deployment orchestrator for the Disentangle Network",
-	Long: `launch manages Disentangle Network fleet deployments across any Kubernetes cluster.
+	Long: `launch-disentangle manages Disentangle Network fleet deployments across any Kubernetes cluster.
 
 Use with the fleet template: github.com/disentangle-network/fleet
 

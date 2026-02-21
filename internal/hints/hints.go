@@ -13,7 +13,7 @@ func Print(steps []NextStep) {
 	}
 	fmt.Println("\n--- Next steps ---")
 	for _, s := range steps {
-		fmt.Printf("  launch %-30s  %s\n", s.Command, s.Description)
+		fmt.Printf("  launch-disentangle %-30s  %s\n", s.Command, s.Description)
 	}
 	fmt.Println()
 }

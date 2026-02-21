@@ -44,13 +44,13 @@ func TestPrintSteps(t *testing.T) {
 	if !strings.Contains(output, "Next steps") {
 		t.Error("output should contain 'Next steps' header")
 	}
-	if !strings.Contains(output, "launch infra plan") {
-		t.Error("output should contain 'launch infra plan'")
+	if !strings.Contains(output, "launch-disentangle infra plan") {
+		t.Error("output should contain 'launch-disentangle infra plan'")
 	}
 	if !strings.Contains(output, "Preview changes") {
 		t.Error("output should contain description")
 	}
-	if !strings.Contains(output, "launch cluster add dev") {
+	if !strings.Contains(output, "launch-disentangle cluster add dev") {
 		t.Error("output should contain second command")
 	}
 }

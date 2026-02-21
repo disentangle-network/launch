@@ -9,7 +9,7 @@ before:
 
 builds:
   - main: .
-    binary: launch
+    binary: launch-disentangle
     env:
       - CGO_ENABLED=0
     goos:
@@ -51,6 +51,6 @@ brews:
     license: Apache-2.0
     skip_upload: auto
     install: |
-      bin.install "launch"
+      bin.install "launch-disentangle"
     test: |
-      system "#{bin}/launch", "--version"
+      system "#{bin}/launch-disentangle", "--version"

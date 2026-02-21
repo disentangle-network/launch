@@ -1,4 +1,4 @@
-# launch
+# launch-disentangle
 
 [![CI](https://github.com/disentangle-network/launch/actions/workflows/ci.yml/badge.svg)](https://github.com/disentangle-network/launch/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/disentangle-network/launch/branch/main/graph/badge.svg)](https://codecov.io/gh/disentangle-network/launch)
@@ -11,25 +11,25 @@ Deployment orchestrator for the [Disentangle Network](https://github.com/disenta
 
 | Command | Description |
 |---------|-------------|
-| `launch setup` | Initialize config and verify environment |
-| `launch preflight` | Check required tools and credentials |
-| `launch infra {init,plan,apply,destroy,output,kubeconfig}` | OCI infrastructure via OpenTofu |
-| `launch fleet init` | Initialize GitOps fleet repository |
-| `launch fleet status` | Show fleet repo state and clusters |
-| `launch cluster add <name>` | Register cluster in fleet |
-| `launch cluster import <name> <kubeconfig>` | Import kubeconfig from any source |
-| `launch secrets init` | Bootstrap SOPS age keys |
-| `launch bootstrap` | FluxCD bootstrap on cluster |
-| `launch mesh init` | Initialize Nebula-PQ CA |
-| `launch mesh add <name>` | Add node to mesh overlay |
-| `launch status` | Show pipeline state and cluster health |
+| `launch-disentangle setup` | Initialize config and verify environment |
+| `launch-disentangle preflight` | Check required tools and credentials |
+| `launch-disentangle infra {init,plan,apply,destroy,output,kubeconfig}` | OCI infrastructure via OpenTofu |
+| `launch-disentangle fleet init` | Initialize GitOps fleet repository |
+| `launch-disentangle fleet status` | Show fleet repo state and clusters |
+| `launch-disentangle cluster add <name>` | Register cluster in fleet |
+| `launch-disentangle cluster import <name> <kubeconfig>` | Import kubeconfig from any source |
+| `launch-disentangle secrets init` | Bootstrap SOPS age keys |
+| `launch-disentangle bootstrap` | FluxCD bootstrap on cluster |
+| `launch-disentangle mesh init` | Initialize Nebula-PQ CA |
+| `launch-disentangle mesh add <name>` | Add node to mesh overlay |
+| `launch-disentangle status` | Show pipeline state and cluster health |
 
 Every command displays next-step hints on completion.
 
 ## Installation
 
 ```sh
-brew install disentangle-network/tap/launch
+brew install disentangle-network/tap/disentangle-launch
 ```
 
 From source:
@@ -66,7 +66,7 @@ Secrets (Cloudflare API token) are resolved automatically from 1Password (`op://
 ## Architecture
 
 ```
-launch setup → preflight → infra plan → infra apply → infra kubeconfig
+launch-disentangle setup → preflight → infra plan → infra apply → infra kubeconfig
                                                             ↓
                          fleet init → cluster import → cluster add
                                                             ↓
@@ -88,7 +88,7 @@ Supports three deployment topologies: OCI cloud (via OpenTofu), Talos bare-metal
 
 ## Required Tools
 
-Run `launch preflight` to check all prerequisites: `tofu`/`terraform`, `kubectl`, `helm`, `flux`, `gh`, `sops`, `age`, `nebula-cert`.
+Run `launch-disentangle preflight` to check all prerequisites: `tofu`/`terraform`, `kubectl`, `helm`, `flux`, `gh`, `sops`, `age`, `nebula-cert`.
 
 ## License
 
