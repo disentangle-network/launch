@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"github.com/spf13/cobra"
 )
@@ -15,6 +16,61 @@ var (
 	commit    = "none"
 	buildDate = "unknown"
 )
+
+// versionInfo returns a human-readable version string.
+//
+// When built via GoReleaser (ldflags inject version != "dev"), the injected
+// values are used verbatim.  For plain `go build` or `go install` the
+// function falls back to runtime/debug.ReadBuildInfo so that VCS metadata
+// embedded by the toolchain is surfaced instead of the useless default
+// "dev (commit: none, built: unknown)".
+func versionInfo() string {
+	if version != "dev" {
+		// GoReleaser path – use the injected ldflags values.
+		return fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, buildDate)
+	}
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev (unknown commit)"
+	}
+
+	// `go install module@vX.Y.Z` embeds the module version in Main.Version.
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+
+	// Plain `go build` – extract VCS settings stamped by the toolchain.
+	var rev, ts string
+	modified := false
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			ts = s.Value
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+
+	if rev == "" {
+		return "dev (unknown commit)"
+	}
+
+	short := rev
+	if len(rev) > 7 {
+		short = rev[:7]
+	}
+
+	if modified {
+		return fmt.Sprintf("dev-%s (dirty)", short)
+	}
+	if ts != "" {
+		return fmt.Sprintf("dev-%s (%s)", short, ts)
+	}
+	return fmt.Sprintf("dev-%s", short)
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "launch",
@@ -35,7 +91,6 @@ Commands:
   status         Health check across clusters`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	Version:       fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, buildDate),
 }
 
 func Execute() error {
@@ -43,6 +98,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.Version = versionInfo()
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/launch/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "show commands without executing")
