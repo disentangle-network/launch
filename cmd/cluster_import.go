@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
@@ -17,22 +16,31 @@ var (
 )
 
 var clusterImportCmd = &cobra.Command{
-	Use:   "import <name> <kubeconfig>",
-	Short: "Import a kubeconfig and register cluster",
-	Long: `Import a kubeconfig from any source (OCI, Talos, Omni, manual),
-merge it into ~/.kube/config, and rename the context to match the
-cluster name. Existing config is backed up before modification.`,
+	Use:   "import <group> <kubeconfig>",
+	Short: "Import a kubeconfig into a named group",
+	Long: `Import a kubeconfig from any source (OCI, Talos, Omni, manual) into
+a group-specific config file at ~/.kube/<group>/config.
+
+Multiple imports with the same group name merge into the same file.
+Context names are preserved from the source kubeconfig unless
+--context is specified.
+
+Example:
+  launch-disentangle cluster import disentangle ~/kubeconfigs/main.yaml
+  launch-disentangle cluster import disentangle ~/kubeconfigs/kv.yaml
+  launch-disentangle cluster import disentangle ~/kubeconfigs/zk.yaml
+  export KUBECONFIG=~/.kube/disentangle/config`,
 	Args: cobra.ExactArgs(2),
 	RunE: runClusterImport,
 }
 
 func init() {
 	clusterCmd.AddCommand(clusterImportCmd)
-	clusterImportCmd.Flags().StringVar(&importContext, "source-context", "", "Context name in source kubeconfig (default: current-context)")
+	clusterImportCmd.Flags().StringVar(&importContext, "context", "", "Rename the imported context (default: keep source context name)")
 }
 
 func runClusterImport(cmd *cobra.Command, args []string) error {
-	name := args[0]
+	group := args[0]
 	sourcePath := args[1]
 
 	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
@@ -44,68 +52,60 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not determine home directory: %w", err)
 	}
 
-	kubeDir := filepath.Join(home, ".kube")
-	if err := os.MkdirAll(kubeDir, 0755); err != nil {
-		return fmt.Errorf("failed to create %s: %w", kubeDir, err)
+	groupDir := filepath.Join(home, ".kube", group)
+	if err := os.MkdirAll(groupDir, 0755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", groupDir, err)
 	}
-	targetPath := filepath.Join(kubeDir, "config")
+	targetPath := filepath.Join(groupDir, "config")
 
 	runner := exec.NewRunner()
 
-	// Copy source to a temp file so we never mutate the original
-	sourceData, err := os.ReadFile(sourcePath)
+	// Detect source context
+	result, err := runner.RunSilent("kubectl", "config", "current-context", "--kubeconfig", sourcePath)
 	if err != nil {
-		return fmt.Errorf("failed to read %s: %w", sourcePath, err)
+		return fmt.Errorf("could not determine source context: %w", err)
 	}
-	tmpFile, err := os.CreateTemp("", "launch-kubeconfig-*.yaml")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmpFile.Write(sourceData); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	tmpFile.Close()
+	sourceCtx := strings.TrimSpace(result.Stdout)
 
-	// Detect source context if not provided
-	if importContext == "" {
-		result, err := runner.RunSilent("kubectl", "config", "current-context", "--kubeconfig", tmpPath)
+	// Determine final context name
+	finalCtx := sourceCtx
+	if importContext != "" {
+		finalCtx = importContext
+	}
+
+	fmt.Printf("Importing from %s (context: %s)\n", sourcePath, sourceCtx)
+
+	// If renaming, work on a temp copy to avoid mutating the source
+	importPath := sourcePath
+	if finalCtx != sourceCtx {
+		tmpFile, err := os.CreateTemp("", "launch-kubeconfig-*.yaml")
 		if err != nil {
-			return fmt.Errorf("could not determine source context: %w", err)
+			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		importContext = strings.TrimSpace(result.Stdout)
-	}
+		defer os.Remove(tmpFile.Name())
 
-	fmt.Printf("Importing cluster '%s' from %s (context: %s)\n", name, sourcePath, importContext)
+		data, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return fmt.Errorf("failed to read %s: %w", sourcePath, err)
+		}
+		if _, err := tmpFile.Write(data); err != nil {
+			tmpFile.Close()
+			return fmt.Errorf("failed to write temp file: %w", err)
+		}
+		tmpFile.Close()
+		importPath = tmpFile.Name()
 
-	// Rename context in the temp copy
-	if importContext != name {
-		fmt.Printf("Renaming context '%s' → '%s'\n", importContext, name)
-		if _, err := runner.RunSilent("kubectl", "config", "rename-context", importContext, name, "--kubeconfig", tmpPath); err != nil {
+		fmt.Printf("Renaming context '%s' → '%s'\n", sourceCtx, finalCtx)
+		if _, err := runner.RunSilent("kubectl", "config", "rename-context", sourceCtx, finalCtx, "--kubeconfig", importPath); err != nil {
 			return fmt.Errorf("failed to rename context: %w", err)
 		}
 	}
 
-	// Back up existing config if present
-	if info, err := os.Stat(targetPath); err == nil && info.Size() > 0 {
-		backupPath := targetPath + "." + time.Now().Format("20060102-150405") + ".bak"
-		existing, err := os.ReadFile(targetPath)
-		if err != nil {
-			return fmt.Errorf("failed to read existing config for backup: %w", err)
-		}
-		if err := os.WriteFile(backupPath, existing, 0600); err != nil {
-			return fmt.Errorf("failed to write backup: %w", err)
-		}
-		fmt.Printf("Backed up existing config to %s\n", backupPath)
-	}
-
-	// Merge using KUBECONFIG env var (the only way colon-separated paths work)
+	// Merge or create
 	if info, err := os.Stat(targetPath); err == nil && info.Size() > 0 {
 		mergeRunner := exec.NewRunner()
 		mergeRunner.Env = []string{
-			fmt.Sprintf("KUBECONFIG=%s:%s", targetPath, tmpPath),
+			fmt.Sprintf("KUBECONFIG=%s:%s", targetPath, importPath),
 		}
 		result, err := mergeRunner.RunSilent("kubectl", "config", "view", "--flatten")
 		if err != nil {
@@ -119,10 +119,9 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to write merged config: %w", err)
 		}
 	} else {
-		// No existing config — just copy the temp file
-		data, err := os.ReadFile(tmpPath)
+		data, err := os.ReadFile(importPath)
 		if err != nil {
-			return fmt.Errorf("failed to read temp kubeconfig: %w", err)
+			return fmt.Errorf("failed to read kubeconfig: %w", err)
 		}
 		if err := os.WriteFile(targetPath, data, 0600); err != nil {
 			return fmt.Errorf("failed to write config: %w", err)
@@ -130,16 +129,22 @@ func runClusterImport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set the imported context as current
-	if _, err := runner.RunSilent("kubectl", "config", "use-context", name, "--kubeconfig", targetPath); err != nil {
+	if _, err := runner.RunSilent("kubectl", "config", "use-context", finalCtx, "--kubeconfig", targetPath); err != nil {
 		fmt.Printf("Warning: could not set current context: %v\n", err)
 	}
 
-	fmt.Printf("\nCluster '%s' imported to %s\n", name, targetPath)
+	// Show what's in the group now
+	ctxResult, _ := runner.RunSilent("kubectl", "config", "get-contexts", "-o", "name", "--kubeconfig", targetPath)
+	contexts := strings.TrimSpace(ctxResult.Stdout)
+
+	fmt.Printf("\nGroup '%s' → %s\n", group, targetPath)
+	fmt.Printf("Contexts: %s\n", strings.ReplaceAll(contexts, "\n", ", "))
+	fmt.Printf("\nTo use: export KUBECONFIG=%s\n", targetPath)
 
 	hints.Print([]hints.NextStep{
-		{Command: "cluster add " + name, Description: "Generate fleet overlays"},
-		{Command: "secrets init --cluster " + name, Description: "Bootstrap SOPS secrets"},
-		{Command: "bootstrap --cluster " + name, Description: "Bootstrap FluxCD"},
+		{Command: fmt.Sprintf("cluster add %s", group), Description: "Generate fleet overlays"},
+		{Command: fmt.Sprintf("secrets init --cluster %s", group), Description: "Bootstrap SOPS secrets"},
+		{Command: fmt.Sprintf("bootstrap --cluster %s", group), Description: "Bootstrap FluxCD"},
 	})
 
 	return nil
