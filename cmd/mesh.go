@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
 	"github.com/spf13/cobra"
@@ -76,12 +77,23 @@ func runMeshInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("CA key already exists at %s (remove to regenerate)", caKeyPath)
 	}
 
+	// Use domain from config for CA name, fall back to github_org
+	caName := "disentangle"
+	cfg, _ := config.Load(cfgFile)
+	if cfg != nil {
+		if cfg.Domain != "" {
+			caName = cfg.Domain
+		} else if cfg.GitHubOrg != "" {
+			caName = cfg.GitHubOrg
+		}
+	}
+
 	fmt.Println("Generating nebula-pq CA certificate (ML-DSA-87)...")
 
 	runner := exec.NewRunner()
 	_, err := runner.Run("nebula-cert", "ca",
 		"-curve", "PQ",
-		"-name", "disentangle-network",
+		"-name", caName,
 		"-out-key", caKeyPath,
 		"-out-crt", caCrtPath,
 	)

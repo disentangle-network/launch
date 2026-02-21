@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/hints"
@@ -67,24 +68,29 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("flux CLI not found: %w\nInstall: https://fluxcd.io/flux/installation/", err)
 	}
 
-	// Step 3: Derive repo info if not provided
+	// Step 3: Derive repo info from git remote if not provided via flags
 	if bootstrapOwner == "" || bootstrapRepo == "" {
 		fmt.Println("Step 3: Detecting repository info from git remote...")
-		result, err := runner.Run("git", "-C", bootstrapFleetDir, "remote", "get-url", "origin")
+		result, err := runner.RunSilent("git", "-C", bootstrapFleetDir, "remote", "get-url", "origin")
 		if err != nil {
 			return fmt.Errorf("could not detect git remote (set --owner and --repo manually): %w", err)
 		}
-		// Parse owner/repo from URL -- user can override with flags
-		if result != nil {
-			fmt.Printf("  Remote: %s\n", result.Stdout)
-		}
+		remoteURL := strings.TrimSpace(result.Stdout)
+		fmt.Printf("  Remote: %s\n", remoteURL)
+		owner, repo := parseGitRemote(remoteURL)
 		if bootstrapOwner == "" {
-			bootstrapOwner = "disentangle-network"
-			fmt.Printf("  Using default owner: %s (override with --owner)\n", bootstrapOwner)
+			if owner == "" {
+				return fmt.Errorf("could not parse owner from remote %q (set --owner manually)", remoteURL)
+			}
+			bootstrapOwner = owner
+			fmt.Printf("  Detected owner: %s\n", bootstrapOwner)
 		}
 		if bootstrapRepo == "" {
-			bootstrapRepo = "fleet"
-			fmt.Printf("  Using default repo: %s (override with --repo)\n", bootstrapRepo)
+			if repo == "" {
+				return fmt.Errorf("could not parse repo from remote %q (set --repo manually)", remoteURL)
+			}
+			bootstrapRepo = repo
+			fmt.Printf("  Detected repo: %s\n", bootstrapRepo)
 		}
 	}
 
@@ -137,4 +143,30 @@ func runBootstrap(cmd *cobra.Command, args []string) error {
 	})
 
 	return nil
+}
+
+// parseGitRemote extracts owner and repo from a git remote URL.
+// Supports https://github.com/owner/repo.git and git@github.com:owner/repo.git.
+func parseGitRemote(url string) (owner, repo string) {
+	// Strip trailing .git
+	url = strings.TrimSuffix(url, ".git")
+
+	// SSH: git@github.com:owner/repo
+	if strings.Contains(url, ":") && !strings.Contains(url, "://") {
+		parts := strings.SplitN(url, ":", 2)
+		if len(parts) == 2 {
+			segments := strings.Split(parts[1], "/")
+			if len(segments) >= 2 {
+				return segments[len(segments)-2], segments[len(segments)-1]
+			}
+		}
+		return "", ""
+	}
+
+	// HTTPS: https://github.com/owner/repo
+	parts := strings.Split(url, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+	return "", ""
 }

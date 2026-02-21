@@ -47,7 +47,7 @@ oci_compartment_id: ocid1.tenancy.oc1..xxx
 cloudflare_account_id: xxx
 domain: disentangle.network
 github_org: disentangle-network
-github_user: privsim
+github_user: your-github-username
 
 repos:
   k8s_oci_foundation: /path/to/k8s-oci-foundation

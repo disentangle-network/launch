@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
@@ -81,17 +82,20 @@ func runFleetInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Setting private remote: %s\n", fleetPrivate)
 		_, _ = runner.Run("git", "remote", "add", "origin", fleetPrivate)
 	} else {
-		cfg, _ := config.Load(cfgFile)
-		owner := "privsim"
-		if cfg != nil && cfg.GitHubUser != "" {
-			owner = cfg.GitHubUser
-		}
-		fmt.Printf("Creating private repo: %s/fleet-deploy\n", owner)
-		_, err := runner.Run("gh", "repo", "create", fmt.Sprintf("%s/fleet-deploy", owner),
-			"--private", "--source", dir, "--push")
-		if err != nil {
-			fmt.Printf("  gh repo create failed — set remote manually:\n")
+		// Detect the active gh user — the owner must match the authenticated account
+		ghUser, err := runner.RunSilent("gh", "api", "user", "--jq", ".login")
+		if err != nil || strings.TrimSpace(ghUser.Stdout) == "" {
+			fmt.Printf("  Could not detect gh user — set remote manually:\n")
 			fmt.Printf("  cd %s && git remote add origin <url> && git push -u origin main\n", dir)
+		} else {
+			owner := strings.TrimSpace(ghUser.Stdout)
+			fmt.Printf("Creating private repo: %s/fleet-deploy\n", owner)
+			_, err := runner.Run("gh", "repo", "create", fmt.Sprintf("%s/fleet-deploy", owner),
+				"--private", "--source", dir, "--push")
+			if err != nil {
+				fmt.Printf("  gh repo create failed — set remote manually:\n")
+				fmt.Printf("  cd %s && git remote add origin <url> && git push -u origin main\n", dir)
+			}
 		}
 	}
 
