@@ -40,7 +40,8 @@ changelog:
       - "^ci:"
 
 brews:
-  - repository:
+  - name: disentangle-launch
+    repository:
       owner: disentangle-network
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
