@@ -17,6 +17,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Files not formatted:"
+            gofmt -l .
+            exit 1
+          fi
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
@@ -29,6 +36,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+      - name: Verify go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
       - name: Upload coverage to Codecov
@@ -49,6 +60,10 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+      - name: Run gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -exclude-generated ./...
 
   build:
     runs-on: ubuntu-latest
