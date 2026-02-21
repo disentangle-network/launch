@@ -49,8 +49,8 @@ func (r *Runner) Run(name string, args ...string) (*Result, error) {
 	if r.Dir != "" {
 		cmd.Dir = r.Dir
 	}
-	if len(r.Env) > 0 {
-		cmd.Env = append(os.Environ(), r.Env...)
+	if env := r.buildEnv(); env != nil {
+		cmd.Env = env
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -88,8 +88,8 @@ func (r *Runner) RunSilent(name string, args ...string) (*Result, error) {
 	if r.Dir != "" {
 		cmd.Dir = r.Dir
 	}
-	if len(r.Env) > 0 {
-		cmd.Env = append(os.Environ(), r.Env...)
+	if env := r.buildEnv(); env != nil {
+		cmd.Env = env
 	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -113,6 +113,31 @@ func (r *Runner) RunSilent(name string, args ...string) (*Result, error) {
 	}
 
 	return result, nil
+}
+
+// buildEnv merges r.Env into the current process environment.
+// Runner values override inherited ones (last-set-wins).
+func (r *Runner) buildEnv() []string {
+	if len(r.Env) == 0 {
+		return nil // nil means inherit
+	}
+	// Build a set of keys we're overriding
+	overrides := make(map[string]bool, len(r.Env))
+	for _, e := range r.Env {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			overrides[k] = true
+		}
+	}
+	// Keep inherited vars that aren't being overridden
+	base := os.Environ()
+	env := make([]string, 0, len(base)+len(r.Env))
+	for _, e := range base {
+		if k, _, ok := strings.Cut(e, "="); ok && overrides[k] {
+			continue
+		}
+		env = append(env, e)
+	}
+	return append(env, r.Env...)
 }
 
 // CommandExists checks if a command is available in PATH.
