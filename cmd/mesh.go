@@ -157,7 +157,7 @@ func MeshAdd(p MeshAddParams) error {
 	}
 
 	// Parse cluster-settings.yaml to get node count
-	settingsData, err := os.ReadFile(settingsPath)
+	settingsData, err := os.ReadFile(filepath.Clean(settingsPath))
 	if err != nil {
 		return fmt.Errorf("reading cluster settings: %w", err)
 	}
@@ -183,7 +183,7 @@ func MeshAdd(p MeshAddParams) error {
 
 	// Create secrets directory for this cluster
 	secretsDir := p.Paths.FleetSecretsDir(p.FleetDir, p.Cluster)
-	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+	if err := os.MkdirAll(secretsDir, 0750); err != nil {
 		return err
 	}
 

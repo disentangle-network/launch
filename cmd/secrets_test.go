@@ -279,6 +279,191 @@ func TestSecretsInitUnknownProvider(t *testing.T) {
 	if !strings.Contains(err.Error(), "age") || !strings.Contains(err.Error(), "yubikey") {
 		t.Errorf("error should list valid providers, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "local") {
+		t.Errorf("error should list 'local' as valid provider, got: %v", err)
+	}
+}
+
+func TestSecretsInitLocal(t *testing.T) {
+	genesisExistsFunc = func(name string) bool { return true }
+	defer func() { genesisExistsFunc = exec.CommandExists }()
+
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "pq-cluster"
+
+	// Create cluster directory
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	envelopePath := filepath.Join(secretsDir, "master-key.enc")
+
+	// Mock genesis init command
+	genesisCmd := fmt.Sprintf("genesis init --provider local --envelope-path %s --output %s",
+		envelopePath, secretsDir)
+	mock.ExpectRun(genesisCmd, "Genesis initialized successfully!\n  Public Key: age1test123\n", nil)
+
+	var buf bytes.Buffer
+	err := SecretsInit(SecretsInitParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		Provider: "local",
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("SecretsInit returned error: %v", err)
+	}
+
+	// Verify genesis was called
+	mock.AssertCalled(t, genesisCmd)
+
+	// Verify genesis-config.yaml was written
+	cfgPath := filepath.Join(secretsDir, "genesis-config.yaml")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("genesis-config.yaml not written: %v", err)
+	}
+	if !strings.Contains(string(data), "provider: local") {
+		t.Errorf("expected 'provider: local', got: %s", string(data))
+	}
+
+	// Verify output
+	output := buf.String()
+	if !strings.Contains(output, "Genesis PQ initialized") {
+		t.Errorf("output should mention 'Genesis PQ initialized', got: %s", output)
+	}
+}
+
+func TestSecretsInitLocalAlreadyExists(t *testing.T) {
+	genesisExistsFunc = func(name string) bool { return true }
+	defer func() { genesisExistsFunc = exec.CommandExists }()
+
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "existing"
+
+	// Create cluster directory
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create existing genesis-bootstrap.yaml
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	bootstrapPath := filepath.Join(secretsDir, "genesis-bootstrap.yaml")
+	if err := os.WriteFile(bootstrapPath, []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := SecretsInit(SecretsInitParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		Provider: "local",
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("expected no error for existing init, got: %v", err)
+	}
+
+	// genesis should NOT have been called
+	mock.AssertCallCount(t, 0)
+
+	output := buf.String()
+	if !strings.Contains(output, "already initialized") {
+		t.Errorf("output should mention 'already initialized', got: %s", output)
+	}
+}
+
+func TestSecretsInitLocalGenesisFailure(t *testing.T) {
+	genesisExistsFunc = func(name string) bool { return true }
+	defer func() { genesisExistsFunc = exec.CommandExists }()
+
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "fail"
+
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	envelopePath := filepath.Join(secretsDir, "master-key.enc")
+
+	// Mock genesis init to fail
+	genesisCmd := fmt.Sprintf("genesis init --provider local --envelope-path %s --output %s",
+		envelopePath, secretsDir)
+	mock.ExpectRun(genesisCmd, "", fmt.Errorf("exit status 1"))
+
+	var buf bytes.Buffer
+	err := SecretsInit(SecretsInitParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		Provider: "local",
+		FleetDir: fleetDir,
+	})
+	if err == nil {
+		t.Fatal("expected error when genesis fails")
+	}
+	if !strings.Contains(err.Error(), "genesis init failed") {
+		t.Errorf("error should mention 'genesis init failed', got: %v", err)
+	}
+}
+
+func TestSecretsInitLocalMissingGenesis(t *testing.T) {
+	genesisExistsFunc = func(name string) bool { return false }
+	defer func() { genesisExistsFunc = exec.CommandExists }()
+
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "no-genesis"
+
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := SecretsInit(SecretsInitParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		Provider: "local",
+		FleetDir: fleetDir,
+	})
+	if err == nil {
+		t.Fatal("expected error when genesis not installed")
+	}
+	if !strings.Contains(err.Error(), "genesis CLI not found") {
+		t.Errorf("error should mention 'genesis CLI not found', got: %v", err)
+	}
+	mock.AssertCallCount(t, 0)
 }
 
 func TestSecretsInitNoCluster(t *testing.T) {

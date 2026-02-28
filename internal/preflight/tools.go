@@ -32,6 +32,7 @@ var RequiredTools = []ToolCheck{
 	{Name: "task", Command: "task", Args: []string{"--version"}, Required: true},
 	{Name: "sops", Command: "sops", Args: []string{"--version"}, Required: false},
 	{Name: "age", Command: "age", Args: []string{"--version"}, Required: false},
+	{Name: "genesis", Command: "genesis", Args: []string{"version"}, Required: false},
 }
 
 func CheckTools() []ToolResult {

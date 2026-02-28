@@ -17,7 +17,8 @@ Deployment orchestrator for the [Disentangle Network](https://github.com/disenta
 | `launch-disentangle fleet init` | Initialize GitOps fleet repository |
 | `launch-disentangle fleet status` | Show fleet repo state and clusters |
 | `launch-disentangle cluster add <name>` | Register cluster in fleet |
-| `launch-disentangle cluster import <name> <kubeconfig>` | Import kubeconfig from any source |
+| `launch-disentangle cluster import <group> <kubeconfig>` | Import kubeconfig into named group |
+| `launch-disentangle cluster list` | List clusters in the fleet |
 | `launch-disentangle secrets init` | Bootstrap SOPS age keys |
 | `launch-disentangle bootstrap` | FluxCD bootstrap on cluster |
 | `launch-disentangle mesh init` | Initialize Nebula-PQ CA |
@@ -75,7 +76,7 @@ launch-disentangle setup → preflight → infra plan → infra apply → infra 
                                               mesh init → mesh add
 ```
 
-Supports three deployment topologies: OCI cloud (via OpenTofu), Talos bare-metal (via Omni or talosctl), and Raspberry Pi edge nodes. All kubeconfigs merge into `~/.config/launch/kubeconfig`.
+Supports three deployment topologies: OCI cloud (via OpenTofu), Talos bare-metal (via Omni or talosctl), and Raspberry Pi edge nodes. Multiple kubeconfigs merge into a single group file at `~/.kube/<group>/config`.
 
 ## Global Flags
 

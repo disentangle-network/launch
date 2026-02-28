@@ -24,6 +24,10 @@ var (
 	secretsFleetDir string
 )
 
+// genesisExistsFunc checks if the genesis CLI is available.
+// Override in tests to avoid requiring the binary.
+var genesisExistsFunc = exec.CommandExists
+
 var secretsInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize secrets for a cluster",
@@ -40,7 +44,7 @@ func init() {
 	secretsCmd.AddCommand(secretsInitCmd)
 
 	secretsInitCmd.Flags().StringVar(&secretsCluster, "cluster", "", "Cluster name (required)")
-	secretsInitCmd.Flags().StringVar(&secretsProvider, "provider", "age", "KMS provider (age, yubikey, oci-vault, aws-kms, gcp-kms)")
+	secretsInitCmd.Flags().StringVar(&secretsProvider, "provider", "age", "KMS provider (local, age, yubikey, oci-vault, aws-kms, gcp-kms)")
 	secretsInitCmd.Flags().StringVar(&secretsKeyARN, "key-arn", "", "KMS key ARN/OCID (for cloud providers)")
 	secretsInitCmd.Flags().StringVar(&secretsFleetDir, "fleet-dir", ".", "Path to fleet repository root")
 	_ = secretsInitCmd.MarkFlagRequired("cluster")
@@ -67,7 +71,7 @@ func SecretsInit(p SecretsInitParams) error {
 
 	// Create secrets directory
 	secretsDir := p.Paths.FleetSecretsDir(p.FleetDir, p.Cluster)
-	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+	if err := os.MkdirAll(secretsDir, 0750); err != nil {
 		return err
 	}
 
@@ -98,6 +102,49 @@ func SecretsInit(p SecretsInitParams) error {
 		fmt.Fprintf(p.Stdout, "  - path_regex: secrets/%s/.*\n", p.Cluster)
 		fmt.Fprintf(p.Stdout, "    age: <public-key-from-above>\n")
 
+	case "local":
+		// PQ hybrid envelope via genesis-operator CLI
+		if !genesisExistsFunc("genesis") {
+			return fmt.Errorf("genesis CLI not found in PATH (required for --provider=local)\n" +
+				"Install: https://github.com/LarsenClose/genesis-operator/releases")
+		}
+
+		envelopePath := filepath.Join(secretsDir, "master-key.enc")
+
+		// Check if already initialized
+		bootstrapPath := filepath.Join(secretsDir, "genesis-bootstrap.yaml")
+		if _, err := os.Stat(bootstrapPath); err == nil {
+			fmt.Fprintf(p.Stdout, "Genesis already initialized at %s\n", secretsDir)
+			return nil
+		}
+
+		// genesis init --provider=local --envelope-path=<path> --output=<secretsDir>
+		result, err := p.Exec.Run("genesis", "init",
+			"--provider", "local",
+			"--envelope-path", envelopePath,
+			"--output", secretsDir,
+		)
+		if err != nil {
+			return fmt.Errorf("genesis init failed: %w", err)
+		}
+
+		fmt.Fprintf(p.Stdout, "Genesis PQ initialized for cluster '%s'\n", p.Cluster)
+		if result != nil && len(result.Stdout) > 0 {
+			fmt.Fprintln(p.Stdout, result.Stdout)
+		}
+
+		// Read the generated .sops.yaml to extract the age public key
+		clusterSopsPath := filepath.Join(secretsDir, ".sops.yaml")
+		sopsData, err := os.ReadFile(filepath.Clean(clusterSopsPath))
+		if err != nil {
+			fmt.Fprintf(p.Stdout, "Warning: could not read generated .sops.yaml: %v\n", err)
+			fmt.Fprintf(p.Stdout, "Manually add the age public key to %s/.sops.yaml\n", p.FleetDir)
+		} else {
+			fmt.Fprintf(p.Stdout, "\nGenerated SOPS config:\n%s\n", string(sopsData))
+			fmt.Fprintf(p.Stdout, "Merge the age key into %s/.sops.yaml with path_regex: secrets/%s/.*\n",
+				p.FleetDir, p.Cluster)
+		}
+
 	case "yubikey":
 		fmt.Fprintln(p.Stdout, "YubiKey provider: genesis init will be called during bootstrap")
 		fmt.Fprintln(p.Stdout, "Ensure your YubiKey is connected when running 'launch bootstrap'")
@@ -110,7 +157,7 @@ func SecretsInit(p SecretsInitParams) error {
 		fmt.Fprintln(p.Stdout, "Genesis will use this key during bootstrap to envelope-encrypt the age key")
 
 	default:
-		return fmt.Errorf("unknown provider: %s (valid: age, yubikey, oci-vault, aws-kms, gcp-kms)", p.Provider)
+		return fmt.Errorf("unknown provider: %s (valid: local, age, yubikey, oci-vault, aws-kms, gcp-kms)", p.Provider)
 	}
 
 	// Write provider config for bootstrap to use later

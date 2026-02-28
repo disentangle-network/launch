@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/disentangle-network/launch/internal/config"
@@ -53,15 +54,16 @@ type ClusterImportParams struct {
 
 // ClusterImport imports a kubeconfig into a group-specific config file.
 func ClusterImport(p ClusterImportParams) error {
+	p.SourcePath = filepath.Clean(p.SourcePath)
 	if _, err := os.Stat(p.SourcePath); os.IsNotExist(err) {
 		return fmt.Errorf("kubeconfig not found: %s", p.SourcePath)
 	}
 
 	groupDir := p.Paths.KubeGroupDir(p.Group)
-	if err := os.MkdirAll(groupDir, 0755); err != nil {
+	if err := os.MkdirAll(groupDir, 0750); err != nil {
 		return fmt.Errorf("failed to create %s: %w", groupDir, err)
 	}
-	targetPath := p.Paths.KubeGroupConfig(p.Group)
+	targetPath := filepath.Clean(p.Paths.KubeGroupConfig(p.Group))
 
 	// Detect source context
 	result, err := p.Exec.RunSilent("kubectl", "config", "current-context", "--kubeconfig", p.SourcePath)
@@ -85,7 +87,7 @@ func ClusterImport(p ClusterImportParams) error {
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
-		defer func() { _ = os.Remove(tmpFile.Name()) }()
+		defer func() { _ = os.Remove(tmpFile.Name()) }() // #nosec G703
 
 		data, err := os.ReadFile(p.SourcePath)
 		if err != nil {
@@ -123,11 +125,11 @@ func ClusterImport(p ClusterImportParams) error {
 		// Clear the env override
 		p.Exec.SetEnv(nil)
 	} else {
-		data, err := os.ReadFile(importPath)
+		data, err := os.ReadFile(filepath.Clean(importPath)) // #nosec G703
 		if err != nil {
 			return fmt.Errorf("failed to read kubeconfig: %w", err)
 		}
-		if err := os.WriteFile(targetPath, data, 0600); err != nil {
+		if err := os.WriteFile(targetPath, data, 0600); err != nil { // #nosec G703
 			return fmt.Errorf("failed to write config: %w", err)
 		}
 	}

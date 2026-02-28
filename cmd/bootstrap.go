@@ -142,9 +142,25 @@ func Bootstrap(p BootstrapParams) error {
 	genesisConfig := filepath.Join(p.FleetDir, "secrets", p.Cluster, "genesis-config.yaml")
 	if _, err := os.Stat(genesisConfig); err == nil {
 		fmt.Fprintln(p.Stdout, "\nStep 5: Provisioning genesis secrets...")
-		ageKeyPath := filepath.Join(p.FleetDir, "secrets", p.Cluster, "age.key")
 
-		if _, err := os.Stat(ageKeyPath); err == nil {
+		secretsDir := filepath.Join(p.FleetDir, "secrets", p.Cluster)
+
+		// Find age identity: prefer genesis identity file, fall back to raw age.key
+		var ageKeyPath string
+		var keySource string
+		genesisIdentity := filepath.Join(secretsDir, "age-identity.txt")
+		legacyAgeKey := filepath.Join(secretsDir, "age.key")
+
+		if _, err := os.Stat(genesisIdentity); err == nil {
+			ageKeyPath = genesisIdentity
+			keySource = "genesis PQ hybrid"
+		} else if _, err := os.Stat(legacyAgeKey); err == nil {
+			ageKeyPath = legacyAgeKey
+			keySource = "age (classical)"
+		}
+
+		if ageKeyPath != "" {
+			fmt.Fprintf(p.Stdout, "  Using %s identity from %s\n", keySource, ageKeyPath)
 			// Create the sops-age secret in the cluster
 			kubectlSecretArgs := []string{"create", "secret", "generic",
 				"sops-age", "-n", "flux-system",
@@ -160,7 +176,8 @@ func Bootstrap(p BootstrapParams) error {
 				fmt.Fprintln(p.Stdout, "  sops-age secret created in flux-system namespace")
 			}
 		} else {
-			fmt.Fprintln(p.Stdout, "  No age key found, skipping sops-age secret creation")
+			fmt.Fprintln(p.Stdout, "  No age identity found, skipping sops-age secret creation")
+			fmt.Fprintf(p.Stdout, "  Run 'launch secrets init --cluster %s' to configure secrets\n", p.Cluster)
 		}
 	} else {
 		fmt.Fprintln(p.Stdout, "\nStep 5: No genesis config found, skipping secrets provisioning")

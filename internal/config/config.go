@@ -94,7 +94,7 @@ func Load(path string) (*Config, error) {
 }
 
 func loadFromFile(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
@@ -114,7 +114,7 @@ func Save(cfg *Config, path string) error {
 			return err
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 	data, err := yaml.Marshal(cfg)

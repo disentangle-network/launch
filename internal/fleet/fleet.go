@@ -69,7 +69,7 @@ func InitFleetRepo(outputDir, name string) error {
 	}
 
 	for _, d := range dirs {
-		if err := os.MkdirAll(filepath.Join(outputDir, d), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(outputDir, d), 0750); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", d, err)
 		}
 	}
@@ -90,7 +90,7 @@ func InitFleetRepo(outputDir, name string) error {
 		relPath = strings.Replace(relPath, "dot-gitignore", ".gitignore", 1)
 
 		destPath := filepath.Join(outputDir, relPath)
-		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
 			return err
 		}
 
@@ -99,7 +99,7 @@ func InitFleetRepo(outputDir, name string) error {
 			return err
 		}
 
-		return os.WriteFile(destPath, data, 0644)
+		return os.WriteFile(destPath, data, 0600)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to copy templates: %w", err)
@@ -125,7 +125,7 @@ Disentangle Network fleet repository. Managed by the launch CLI.
     secrets/           SOPS-encrypted secrets (per-cluster)
 `, name)
 
-	if err := os.WriteFile(filepath.Join(outputDir, "README.md"), []byte(readme), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(outputDir, "README.md"), []byte(readme), 0600); err != nil {
 		return fmt.Errorf("failed to write README: %w", err)
 	}
 
@@ -141,7 +141,7 @@ func AddCluster(fleetDir string, cfg ClusterConfig) error {
 
 	// Create cluster directory
 	clusterDir := filepath.Join(fleetDir, "clusters", cfg.Name)
-	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+	if err := os.MkdirAll(clusterDir, 0750); err != nil {
 		return err
 	}
 
@@ -188,7 +188,7 @@ spec:
   prune: true
 `, cfg.Name)
 
-	if err := os.WriteFile(filepath.Join(clusterDir, "infrastructure.yaml"), []byte(infraKustomization), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(clusterDir, "infrastructure.yaml"), []byte(infraKustomization), 0600); err != nil {
 		return err
 	}
 
@@ -209,7 +209,7 @@ spec:
     - name: %s-infrastructure
 `, cfg.Name, cfg.Name)
 
-	if err := os.WriteFile(filepath.Join(clusterDir, "apps.yaml"), []byte(appsKustomization), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(clusterDir, "apps.yaml"), []byte(appsKustomization), 0600); err != nil {
 		return err
 	}
 
@@ -222,7 +222,7 @@ func renderTemplate(path, tmplStr string, data any) error {
 		return fmt.Errorf("template parse error: %w", err)
 	}
 
-	f, err := os.Create(path)
+	f, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		return err
 	}

@@ -45,7 +45,7 @@ func (r *Runner) Run(name string, args ...string) (*Result, error) {
 		_, _ = fmt.Fprintf(r.Stdout, "$ %s\n", cmdStr)
 	}
 
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204
 	if r.Dir != "" {
 		cmd.Dir = r.Dir
 	}
@@ -84,7 +84,7 @@ func (r *Runner) RunSilent(name string, args ...string) (*Result, error) {
 		return &Result{Command: cmdStr, ExitCode: 0}, nil
 	}
 
-	cmd := exec.Command(name, args...)
+	cmd := exec.Command(name, args...) // #nosec G204
 	if r.Dir != "" {
 		cmd.Dir = r.Dir
 	}

@@ -452,8 +452,8 @@ func TestBootstrapGenesisConfigNoAgeKey(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "No age key found, skipping sops-age secret creation") {
-		t.Errorf("expected 'No age key found' message, got:\n%s", out)
+	if !strings.Contains(out, "No age identity found, skipping sops-age secret creation") {
+		t.Errorf("expected 'No age identity found' message, got:\n%s", out)
 	}
 }
 
@@ -542,6 +542,110 @@ func TestBootstrapOwnerOnlyProvided(t *testing.T) {
 	if !strings.Contains(out, "Detected repo: fleet-deploy") {
 		t.Errorf("expected detected repo message, got:\n%s", out)
 	}
+}
+
+func TestBootstrapWithGenesisIdentity(t *testing.T) {
+	tmp := t.TempDir()
+	cluster := "pq-cluster"
+
+	// Create cluster dir
+	if err := os.MkdirAll(filepath.Join(tmp, "clusters", cluster), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create genesis-config and age-identity.txt (NOT age.key)
+	secretsDir := filepath.Join(tmp, "secrets", cluster)
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "genesis-config.yaml"), []byte("provider: local"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	identityPath := filepath.Join(secretsDir, "age-identity.txt")
+	if err := os.WriteFile(identityPath, []byte("AGE-SECRET-KEY-1PQTEST"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := exec.NewMockExecutor()
+	mock.ExpectRun("kubectl cluster-info --request-timeout=5s", "running", nil)
+	mock.ExpectRun("flux version --client", "v2.2.0", nil)
+	mock.ExpectRun("git -C "+tmp+" remote get-url origin",
+		"https://github.com/disentangle-network/fleet-deploy.git\n", nil)
+	mock.ExpectRun("flux bootstrap github --owner disentangle-network --repository fleet-deploy --branch main --path clusters/"+cluster+" --personal", "", nil)
+	mock.ExpectRun("kubectl create secret generic sops-age -n flux-system --from-file=age.agekey="+identityPath, "", nil)
+
+	var buf bytes.Buffer
+	err := Bootstrap(BootstrapParams{
+		Exec:     mock,
+		Paths:    paths.NewWithHome(tmp, nil),
+		Stdout:   &buf,
+		Cluster:  cluster,
+		FleetDir: tmp,
+		Branch:   "main",
+	})
+	if err != nil {
+		t.Fatalf("Bootstrap returned error: %v", err)
+	}
+
+	// Verify it used genesis identity, not age.key
+	mock.AssertCalled(t, "kubectl create secret generic sops-age -n flux-system --from-file=age.agekey="+identityPath)
+
+	output := buf.String()
+	if !strings.Contains(output, "genesis PQ hybrid") {
+		t.Errorf("output should mention 'genesis PQ hybrid', got: %s", output)
+	}
+}
+
+func TestBootstrapPrefersGenesisOverAge(t *testing.T) {
+	// When BOTH age.key and age-identity.txt exist, genesis takes priority
+	tmp := t.TempDir()
+	cluster := "both"
+
+	if err := os.MkdirAll(filepath.Join(tmp, "clusters", cluster), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	secretsDir := filepath.Join(tmp, "secrets", cluster)
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "genesis-config.yaml"), []byte("provider: local"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both files exist
+	identityPath := filepath.Join(secretsDir, "age-identity.txt")
+	if err := os.WriteFile(identityPath, []byte("AGE-SECRET-KEY-1PQ"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "age.key"), []byte("AGE-SECRET-KEY-1CLASSICAL"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := exec.NewMockExecutor()
+	mock.ExpectRun("kubectl cluster-info --request-timeout=5s", "running", nil)
+	mock.ExpectRun("flux version --client", "v2.2.0", nil)
+	mock.ExpectRun("git -C "+tmp+" remote get-url origin",
+		"https://github.com/disentangle-network/fleet-deploy.git\n", nil)
+	mock.ExpectRun("flux bootstrap github --owner disentangle-network --repository fleet-deploy --branch main --path clusters/"+cluster+" --personal", "", nil)
+	// Should use genesis identity, NOT age.key
+	mock.ExpectRun("kubectl create secret generic sops-age -n flux-system --from-file=age.agekey="+identityPath, "", nil)
+
+	var buf bytes.Buffer
+	err := Bootstrap(BootstrapParams{
+		Exec:     mock,
+		Paths:    paths.NewWithHome(tmp, nil),
+		Stdout:   &buf,
+		Cluster:  cluster,
+		FleetDir: tmp,
+		Branch:   "main",
+	})
+	if err != nil {
+		t.Fatalf("Bootstrap returned error: %v", err)
+	}
+
+	// Verify it chose genesis over age
+	mock.AssertCalled(t, "kubectl create secret generic sops-age -n flux-system --from-file=age.agekey="+identityPath)
 }
 
 func TestParseGitRemoteSSHMinimal(t *testing.T) {
