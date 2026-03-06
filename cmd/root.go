@@ -90,15 +90,21 @@ var rootCmd = &cobra.Command{
 Use with the fleet template: github.com/disentangle-network/fleet
 
 Commands:
-  setup          Configure credentials (GitHub, Cloudflare, SOPS)
-  preflight      Validate tools and credentials
-  cluster add    Add a cluster to the fleet
-  cluster list   List clusters in the fleet
-  secrets init   Bootstrap secrets for a cluster
-  bootstrap      FluxCD bootstrap + genesis secrets
-  mesh init      Generate nebula-pq CA certificate
-  mesh add       Generate host certificates for a cluster
-  status         Health check across clusters`,
+  setup                Configure credentials (GitHub, Cloudflare, SOPS)
+  preflight            Validate tools and credentials
+  infra                Manage OCI infrastructure via OpenTofu
+  fleet init           Initialize private fleet repo from template
+  fleet status         Show fleet repo status
+  cluster add          Add a cluster to the fleet
+  cluster import       Import kubeconfig into named group
+  cluster list         List clusters in the fleet
+  cluster remove       Remove a cluster from the fleet
+  secrets init         Bootstrap secrets for a cluster
+  bootstrap            FluxCD bootstrap + genesis secrets
+  mesh init            Generate nebula-pq CA certificate
+  mesh add             Generate host certificates for a cluster
+  status               Health check across clusters
+  completion           Generate shell completion scripts`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
