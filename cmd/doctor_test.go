@@ -197,3 +197,139 @@ func TestDoctorViaCobra(t *testing.T) {
 		t.Fatalf("doctor via cobra returned error: %v", err)
 	}
 }
+
+func TestStatusLabelUnknown(t *testing.T) {
+	label := statusLabel("unknown")
+	if label != "????" {
+		t.Errorf("statusLabel(%q) = %q, want %q", "unknown", label, "????")
+	}
+}
+
+func TestCheckConfigInvalidYAML(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create a config file with invalid YAML content
+	cfgPath := filepath.Join(tmp, "bad-config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("!!!invalid\n\t::: yaml"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	p := paths.NewWithHome(tmp, nil)
+	check := checkConfig(DoctorParams{
+		Exec:    exec.NewMockExecutor(),
+		Paths:   p,
+		CfgFile: cfgPath,
+	})
+
+	if check.Status != "fail" {
+		t.Errorf("checkConfig status = %q, want %q", check.Status, "fail")
+	}
+	if !strings.Contains(check.Detail, "failed to load") {
+		t.Errorf("checkConfig detail = %q, want it to contain %q", check.Detail, "failed to load")
+	}
+}
+
+func TestCheckFleetRepoNoGit(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create fleet dir without .git
+	fleetDir := filepath.Join(tmp, "fleet")
+	if err := os.MkdirAll(fleetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	check, clusterNames := checkFleetRepo(fleetDir)
+
+	if check.Status != "fail" {
+		t.Errorf("checkFleetRepo status = %q, want %q", check.Status, "fail")
+	}
+	if !strings.Contains(check.Detail, "not a git repository") {
+		t.Errorf("checkFleetRepo detail = %q, want it to contain %q", check.Detail, "not a git repository")
+	}
+	if clusterNames != nil {
+		t.Errorf("checkFleetRepo clusterNames = %v, want nil", clusterNames)
+	}
+}
+
+func TestCheckFleetRepoNoAppsBase(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Create fleet dir with .git but no apps/base
+	fleetDir := filepath.Join(tmp, "fleet")
+	if err := os.MkdirAll(filepath.Join(fleetDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	check, clusterNames := checkFleetRepo(fleetDir)
+
+	if check.Status != "warn" {
+		t.Errorf("checkFleetRepo status = %q, want %q", check.Status, "warn")
+	}
+	if !strings.Contains(check.Detail, "missing apps/base") {
+		t.Errorf("checkFleetRepo detail = %q, want it to contain %q", check.Detail, "missing apps/base")
+	}
+	if clusterNames != nil {
+		t.Errorf("checkFleetRepo clusterNames = %v, want nil", clusterNames)
+	}
+}
+
+func TestCheckClustersPartialSettings(t *testing.T) {
+	tmp := t.TempDir()
+
+	fleetDir := filepath.Join(tmp, "fleet")
+	clusterNames := []string{"cluster-a", "cluster-b"}
+
+	// Create cluster dirs
+	for _, name := range clusterNames {
+		if err := os.MkdirAll(filepath.Join(fleetDir, "clusters", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Only give cluster-a a settings file
+	if err := os.WriteFile(
+		filepath.Join(fleetDir, "clusters", "cluster-a", "cluster-settings.yaml"),
+		[]byte("nodes: 3\n"), 0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	check := checkClusters(fleetDir, clusterNames)
+
+	if check.Status != "warn" {
+		t.Errorf("checkClusters status = %q, want %q", check.Status, "warn")
+	}
+	if !strings.Contains(check.Detail, "1/2") {
+		t.Errorf("checkClusters detail = %q, want it to contain %q", check.Detail, "1/2")
+	}
+}
+
+func TestCheckSecretsPartial(t *testing.T) {
+	tmp := t.TempDir()
+
+	fleetDir := filepath.Join(tmp, "fleet")
+	clusterNames := []string{"cluster-a", "cluster-b"}
+
+	// Create secrets dir only for cluster-a
+	if err := os.MkdirAll(filepath.Join(fleetDir, "secrets", "cluster-a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(fleetDir, "secrets", "cluster-a", "genesis-config.yaml"),
+		[]byte("kind: Secret\n"), 0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	check := checkSecrets(fleetDir, clusterNames)
+
+	if check.Status != "warn" {
+		t.Errorf("checkSecrets status = %q, want %q", check.Status, "warn")
+	}
+	if !strings.Contains(check.Detail, "1/2") {
+		t.Errorf("checkSecrets detail = %q, want it to contain %q", check.Detail, "1/2")
+	}
+	if !strings.Contains(check.Fix, "cluster-b") {
+		t.Errorf("checkSecrets fix = %q, want it to contain %q", check.Fix, "cluster-b")
+	}
+}
