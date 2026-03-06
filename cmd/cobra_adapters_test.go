@@ -631,3 +631,14 @@ func TestRunCompletionViaCobra(t *testing.T) {
 		})
 	}
 }
+
+// --------------------------------------------------------------------------
+// runPluginList via Cobra
+// --------------------------------------------------------------------------
+
+func TestRunPluginListViaCobra(t *testing.T) {
+	err := execRootCmd([]string{"plugin", "list"})
+	if err != nil {
+		t.Fatalf("plugin list returned error: %v", err)
+	}
+}

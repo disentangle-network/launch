@@ -8,6 +8,9 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/disentangle-network/launch/internal/config"
+	"github.com/disentangle-network/launch/internal/paths"
+	"github.com/disentangle-network/launch/internal/plugin"
 	"github.com/spf13/cobra"
 )
 
@@ -104,6 +107,7 @@ Commands:
   mesh init            Generate nebula-pq CA certificate
   mesh add             Generate host certificates for a cluster
   doctor               Diagnose common deployment pipeline issues
+  plugin list          List discovered external plugins
   status               Health check across clusters
   completion           Generate shell completion scripts`,
 	SilenceUsage:  true,
@@ -111,7 +115,32 @@ Commands:
 }
 
 func Execute() error {
+	registerPlugins()
 	return rootCmd.Execute()
+}
+
+// registerPlugins discovers external launch-* plugins and adds them
+// as subcommands so they appear in help and are directly invocable.
+func registerPlugins() {
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	// Build set of built-in command names
+	builtins := make(map[string]bool)
+	for _, cmd := range rootCmd.Commands() {
+		builtins[cmd.Name()] = true
+	}
+
+	dirs := pluginSearchDirs(p)
+	for _, pl := range plugin.Discover(dirs) {
+		if builtins[pl.Name] {
+			continue
+		}
+		rootCmd.AddCommand(pluginCommand(pl))
+	}
 }
 
 func init() {

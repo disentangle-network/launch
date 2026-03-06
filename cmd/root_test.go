@@ -243,6 +243,7 @@ func TestCommandRegistration(t *testing.T) {
 		"mesh init":        {"ca-output"},
 		"mesh add":         {"cluster", "lighthouse", "lighthouse-addr", "fleet-dir"},
 		"status":           {"fleet-dir"},
+		"plugin list":      {},
 	}
 	for path, flags := range commands {
 		parts := strings.Fields(path)
@@ -288,7 +289,7 @@ func TestRootCommandHelp(t *testing.T) {
 
 	expectedSubcommands := []string{
 		"setup", "preflight", "bootstrap", "fleet", "cluster",
-		"secrets", "infra", "mesh", "status",
+		"secrets", "infra", "mesh", "plugin", "status",
 	}
 	for _, sub := range expectedSubcommands {
 		if !strings.Contains(output, sub) {
