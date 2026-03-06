@@ -214,6 +214,119 @@ func TestCheckAgeKeyEnvOverride(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// checkCloudflare — additional branches
+// ---------------------------------------------------------------------------
+
+func TestCheckCloudflareInvalid(t *testing.T) {
+	// Token is present but both verification endpoints return non-200.
+	testToken := "cf-bad-token"
+	t.Setenv("CLOUDFLARE_API_TOKEN", testToken)
+	t.Setenv("OP_CLOUDFLARE_REF", "")
+
+	verifyCmd := "curl -s -o /dev/null -w %{http_code} -H Authorization: Bearer " + testToken + " https://api.cloudflare.com/client/v4/user/tokens/verify"
+	zonesCmd := "curl -s -o /dev/null -w %{http_code} -H Authorization: Bearer " + testToken + " https://api.cloudflare.com/client/v4/zones?per_page=1"
+
+	m := exec.NewMockExecutor()
+	m.ExpectRun(verifyCmd, "403", nil)
+	m.ExpectRun(zonesCmd, "403", nil)
+
+	result := checkCloudflare(m)
+	if result.Status != "invalid" {
+		t.Errorf("expected status invalid, got %q (detail: %s)", result.Status, result.Detail)
+	}
+	if !contains(result.Detail, "could not be verified") {
+		t.Errorf("expected detail about verification failure, got %q", result.Detail)
+	}
+}
+
+func TestCheckCloudflareFallbackEndpoint(t *testing.T) {
+	// First endpoint (verify) curl fails, second endpoint (zones) succeeds.
+	testToken := "cf-fallback-token"
+	t.Setenv("CLOUDFLARE_API_TOKEN", testToken)
+	t.Setenv("OP_CLOUDFLARE_REF", "")
+
+	verifyCmd := "curl -s -o /dev/null -w %{http_code} -H Authorization: Bearer " + testToken + " https://api.cloudflare.com/client/v4/user/tokens/verify"
+	zonesCmd := "curl -s -o /dev/null -w %{http_code} -H Authorization: Bearer " + testToken + " https://api.cloudflare.com/client/v4/zones?per_page=1"
+
+	m := exec.NewMockExecutor()
+	m.ExpectRun(verifyCmd, "", fmt.Errorf("curl failed"))
+	m.ExpectRun(zonesCmd, "200", nil)
+
+	result := checkCloudflare(m)
+	if result.Status != "ok" {
+		t.Errorf("expected status ok via fallback endpoint, got %q (detail: %s)", result.Status, result.Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// checkGitHub — additional branches
+// ---------------------------------------------------------------------------
+
+func TestCheckGitHubOKNoLoggedInString(t *testing.T) {
+	// gh auth status succeeds but output does not contain "Logged in to".
+	m := exec.NewMockExecutor()
+	m.ExpectRunWithResult(
+		"gh auth status",
+		&exec.Result{
+			Command: "gh auth status",
+			Stdout:  "github.com\n  authenticated\n",
+		},
+		nil,
+	)
+
+	result := checkGitHub(m)
+	if result.Status != "ok" {
+		t.Errorf("expected status ok, got %q (detail: %s)", result.Status, result.Detail)
+	}
+	if result.Detail != "authenticated" {
+		t.Errorf("expected detail 'authenticated', got %q", result.Detail)
+	}
+}
+
+func TestCheckGitHubOKMultilineLoggedIn(t *testing.T) {
+	// "Logged in to" line followed by additional lines — exercises the newline
+	// truncation branch.
+	m := exec.NewMockExecutor()
+	m.ExpectRunWithResult(
+		"gh auth status",
+		&exec.Result{
+			Command: "gh auth status",
+			Stdout:  "github.com\n  Logged in to github.com account user1 (keyring)\n  Token: gho_xxx\n",
+		},
+		nil,
+	)
+
+	result := checkGitHub(m)
+	if result.Status != "ok" {
+		t.Errorf("expected status ok, got %q (detail: %s)", result.Status, result.Detail)
+	}
+	if !contains(result.Detail, "Logged in to") {
+		t.Errorf("expected detail to contain 'Logged in to', got %q", result.Detail)
+	}
+	// Must be truncated to the first line (no newlines).
+	if contains(result.Detail, "\n") {
+		t.Errorf("expected detail to be single-line, got %q", result.Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// checkAgeKey — additional branches
+// ---------------------------------------------------------------------------
+
+func TestCheckAgeKeyEnvOverrideMissing(t *testing.T) {
+	// SOPS_AGE_KEY_FILE is set to a path that does not exist.
+	t.Setenv("SOPS_AGE_KEY_FILE", "/tmp/nonexistent-age-key-"+t.Name()+".txt")
+
+	result := checkAgeKey()
+	if result.Status != "missing" {
+		t.Errorf("expected status missing, got %q (detail: %s)", result.Status, result.Detail)
+	}
+	if !contains(result.Detail, "not found") {
+		t.Errorf("expected detail to mention 'not found', got %q", result.Detail)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // AllCredentialsOK
 // ---------------------------------------------------------------------------
 
