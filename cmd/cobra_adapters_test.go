@@ -59,6 +59,8 @@ func resetRootCmd() {
 	secretsFleetDir = "."
 
 	statusFleetDir = ""
+
+	doctorFleetDir = ""
 }
 
 // execRootCmd is a small helper that resets state, sets args, captures

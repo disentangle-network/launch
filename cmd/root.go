@@ -103,6 +103,7 @@ Commands:
   bootstrap            FluxCD bootstrap + genesis secrets
   mesh init            Generate nebula-pq CA certificate
   mesh add             Generate host certificates for a cluster
+  doctor               Diagnose common deployment pipeline issues
   status               Health check across clusters
   completion           Generate shell completion scripts`,
 	SilenceUsage:  true,
