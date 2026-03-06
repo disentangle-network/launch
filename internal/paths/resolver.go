@@ -122,6 +122,11 @@ func (r *Resolver) InfraEnvDir(infraDir, env string) string {
 	return filepath.Join(infraDir, "environments", env)
 }
 
+// PluginDir returns ~/.config/launch/plugins.
+func (r *Resolver) PluginDir() string {
+	return filepath.Join(r.HomeDir, ".config", "launch", "plugins")
+}
+
 // OCIConfigPath returns ~/.oci/config.
 func (r *Resolver) OCIConfigPath() string {
 	return filepath.Join(r.HomeDir, ".oci", "config")

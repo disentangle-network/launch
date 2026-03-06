@@ -166,6 +166,14 @@ func TestInfraEnvDir(t *testing.T) {
 	}
 }
 
+func TestPluginDir(t *testing.T) {
+	r := NewWithHome("/home/test", nil)
+	want := filepath.Join("/home/test", ".config", "launch", "plugins")
+	if got := r.PluginDir(); got != want {
+		t.Errorf("PluginDir() = %q, want %q", got, want)
+	}
+}
+
 func TestOCIConfigPath(t *testing.T) {
 	r := NewWithHome("/home/test", nil)
 	want := filepath.Join("/home/test", ".oci", "config")
