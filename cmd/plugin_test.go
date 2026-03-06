@@ -88,3 +88,38 @@ func TestPluginCommand(t *testing.T) {
 		t.Error("pluginCommand() should have DisableFlagParsing = true")
 	}
 }
+
+func TestRunPluginSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "launch-hello")
+	content := "#!/bin/sh\necho hello from plugin\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runPlugin(script, []string{})
+	if err != nil {
+		t.Fatalf("runPlugin() returned error: %v", err)
+	}
+}
+
+func TestRunPluginWithArgs(t *testing.T) {
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "launch-echo")
+	content := "#!/bin/sh\necho \"$@\"\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runPlugin(script, []string{"arg1", "arg2"})
+	if err != nil {
+		t.Fatalf("runPlugin() returned error: %v", err)
+	}
+}
+
+func TestRunPluginNotFound(t *testing.T) {
+	err := runPlugin("/nonexistent/launch-fake", []string{})
+	if err == nil {
+		t.Fatal("expected error for nonexistent plugin")
+	}
+}
