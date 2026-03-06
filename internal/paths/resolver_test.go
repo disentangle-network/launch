@@ -174,6 +174,38 @@ func TestOCIConfigPath(t *testing.T) {
 	}
 }
 
+func TestNewWithConfig(t *testing.T) {
+	cfg := &config.Config{FleetDir: "/test/fleet"}
+	r, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+	if r.HomeDir == "" {
+		t.Error("HomeDir should not be empty")
+	}
+	if r.Cfg.FleetDir != "/test/fleet" {
+		t.Errorf("Cfg.FleetDir = %q, want %q", r.Cfg.FleetDir, "/test/fleet")
+	}
+}
+
+func TestNewWithNilConfig(t *testing.T) {
+	r, err := New(nil)
+	if err != nil {
+		t.Fatalf("New(nil) returned error: %v", err)
+	}
+	if r.Cfg == nil {
+		t.Fatal("Cfg should not be nil when New is called with nil")
+	}
+}
+
+func TestNewReturnsErrorWhenHomeUnavailable(t *testing.T) {
+	t.Setenv("HOME", "")
+	_, err := New(nil)
+	if err == nil {
+		t.Fatal("New() should return error when HOME is not set")
+	}
+}
+
 func TestInfraDirPrecedence(t *testing.T) {
 	cfg := &config.Config{
 		InfraDir: "/cfg/infra",

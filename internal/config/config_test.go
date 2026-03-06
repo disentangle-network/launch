@@ -395,6 +395,51 @@ func TestLoadFromDefaultConfigPath(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigDirErrorWhenHomeUnavailable(t *testing.T) {
+	t.Setenv("HOME", "")
+	_, err := DefaultConfigDir()
+	if err == nil {
+		t.Fatal("DefaultConfigDir() should return error when HOME is not set")
+	}
+}
+
+func TestDefaultConfigPathErrorWhenHomeUnavailable(t *testing.T) {
+	t.Setenv("HOME", "")
+	_, err := DefaultConfigPath()
+	if err == nil {
+		t.Fatal("DefaultConfigPath() should return error when HOME is not set")
+	}
+}
+
+func TestLoadEmptyPathErrorWhenHomeUnavailable(t *testing.T) {
+	// When no explicit path is given, no .launch.yaml in cwd, and HOME is
+	// unset, Load should propagate the DefaultConfigPath error.
+	dir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getting cwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	t.Setenv("HOME", "")
+	_, err = Load("")
+	if err == nil {
+		t.Fatal("Load(\"\") should return error when HOME is not set and no .launch.yaml exists")
+	}
+}
+
+func TestSaveEmptyPathErrorWhenHomeUnavailable(t *testing.T) {
+	t.Setenv("HOME", "")
+	cfg := &Config{Environment: "test"}
+	err := Save(cfg, "")
+	if err == nil {
+		t.Fatal("Save with empty path should return error when HOME is not set")
+	}
+}
+
 func TestSaveFilePermissions(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
