@@ -36,7 +36,10 @@ GitOps source of truth that FluxCD watches.`,
 var fleetStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show fleet repo status",
-	RunE:  runFleetStatus,
+	Long: `Show the fleet repository's git status, configured clusters, and apps/base presence.
+Useful for verifying the fleet repo is properly initialized and up to date.`,
+	Example: `  launch-disentangle fleet status`,
+	RunE:    runFleetStatus,
 }
 
 func init() {

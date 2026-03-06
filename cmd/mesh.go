@@ -43,6 +43,8 @@ var meshAddCmd = &cobra.Command{
 	Short: "Generate nebula host certificates for a cluster",
 	Long: `Generate post-quantum host certificates for each node in a cluster
 and SOPS-encrypt them into the fleet repository's secrets directory.`,
+	Example: `  launch-disentangle mesh add --cluster edge-1
+  launch-disentangle mesh add --cluster edge-1 --lighthouse --lighthouse-addr 1.2.3.4:4242`,
 	RunE: runMeshAdd,
 }
 

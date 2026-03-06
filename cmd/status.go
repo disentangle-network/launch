@@ -18,7 +18,9 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show fleet health across clusters",
 	Long:  "Checks FluxCD reconciliation status and pod health for each cluster in the fleet.",
-	RunE:  runStatus,
+	Example: `  launch-disentangle status
+  launch-disentangle status --fleet-dir ~/custom-fleet`,
+	RunE: runStatus,
 }
 
 func init() {

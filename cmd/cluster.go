@@ -54,14 +54,21 @@ Nebula modes:
 var clusterListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List clusters in the fleet",
-	RunE:  runClusterList,
+	Long:  "List all clusters configured in the fleet repository with their settings summary.",
+	Example: `  launch-disentangle cluster list
+  launch-disentangle cluster list --fleet-dir ~/custom-fleet`,
+	RunE: runClusterList,
 }
 
 var clusterRemoveCmd = &cobra.Command{
 	Use:   "remove <name>",
 	Short: "Remove a cluster from the fleet",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runClusterRemove,
+	Long: `Remove a cluster's Kustomize overlays, Helm patches, and secrets directory
+from the fleet repository. Does not affect running infrastructure.`,
+	Example: `  launch-disentangle cluster remove edge-1
+  launch-disentangle cluster remove edge-1 --fleet-dir ~/custom-fleet`,
+	Args: cobra.ExactArgs(1),
+	RunE: runClusterRemove,
 }
 
 func init() {

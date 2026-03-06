@@ -45,37 +45,63 @@ var infraCmd = &cobra.Command{
 var infraInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Terraform providers",
-	RunE:  runInfraInit,
+	Long: `Download and initialize Terraform/OpenTofu providers for the target environment.
+Runs tofu init in the environment's infrastructure directory.`,
+	Example: `  launch-disentangle infra init
+  launch-disentangle infra init --env prod`,
+	RunE: runInfraInit,
 }
 
 var infraPlanCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Plan infrastructure changes",
-	RunE:  runInfraPlan,
+	Long: `Generate and display a Terraform execution plan without applying changes.
+Automatically resolves secrets from 1Password and sets required environment variables.`,
+	Example: `  launch-disentangle infra plan
+  launch-disentangle infra plan --env prod`,
+	RunE: runInfraPlan,
 }
 
 var infraApplyCmd = &cobra.Command{
 	Use:   "apply",
 	Short: "Apply infrastructure changes",
-	RunE:  runInfraApply,
+	Long: `Apply the Terraform execution plan to create or update infrastructure.
+Prompts for confirmation before applying unless --yes is specified.`,
+	Example: `  launch-disentangle infra apply
+  launch-disentangle infra apply --env prod --yes`,
+	RunE: runInfraApply,
 }
 
 var infraDestroyCmd = &cobra.Command{
 	Use:   "destroy",
 	Short: "Destroy infrastructure (DANGEROUS)",
-	RunE:  runInfraDestroy,
+	Long: `Destroy all infrastructure managed by Terraform in the target environment.
+This is a destructive operation that cannot be undone. Prompts for
+confirmation unless --yes is specified.`,
+	Example: `  launch-disentangle infra destroy --env dev
+  launch-disentangle infra destroy --env dev --yes`,
+	RunE: runInfraDestroy,
 }
 
 var infraOutputCmd = &cobra.Command{
 	Use:   "output",
 	Short: "Show Terraform outputs",
-	RunE:  runInfraOutput,
+	Long: `Display the Terraform output values for the target environment.
+Useful for retrieving cluster endpoints, VCN IDs, and other provisioned resource details.`,
+	Example: `  launch-disentangle infra output
+  launch-disentangle infra output --env prod`,
+	RunE: runInfraOutput,
 }
 
 var infraKubeconfigCmd = &cobra.Command{
 	Use:   "kubeconfig",
 	Short: "Fetch kubeconfig from OCI",
-	RunE:  runInfraKubeconfig,
+	Long: `Retrieve the kubeconfig for an OKE cluster from Oracle Cloud Infrastructure.
+Extracts the cluster OCID from Terraform outputs and uses the OCI CLI
+to generate the kubeconfig.`,
+	Example: `  launch-disentangle infra kubeconfig
+  launch-disentangle infra kubeconfig --env prod`,
+	RunE: runInfraKubeconfig,
 }
 
 func init() {

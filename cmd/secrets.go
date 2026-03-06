@@ -36,6 +36,8 @@ using the specified KMS provider (oci-vault, aws-kms, gcp-kms, yubikey, age).
 
 This creates a SOPS configuration entry for the cluster and stores the
 encrypted age key in the fleet repo's secrets directory.`,
+	Example: `  launch-disentangle secrets init --cluster edge-1
+  launch-disentangle secrets init --cluster prod-1 --provider oci-vault --key-arn <ocid>`,
 	RunE: runSecretsInit,
 }
 

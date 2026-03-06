@@ -613,3 +613,21 @@ func TestRunStatusViaCobra(t *testing.T) {
 		t.Fatalf("status returned error: %v", err)
 	}
 }
+
+// --------------------------------------------------------------------------
+// runCompletion via Cobra
+//
+// The completion command uses cobra's built-in generation.  Each shell
+// variant should succeed without error.
+// --------------------------------------------------------------------------
+
+func TestRunCompletionViaCobra(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
+			err := execRootCmd([]string{"completion", shell})
+			if err != nil {
+				t.Fatalf("completion %s via cobra returned error: %v", shell, err)
+			}
+		})
+	}
+}
