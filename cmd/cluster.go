@@ -57,10 +57,18 @@ var clusterListCmd = &cobra.Command{
 	RunE:  runClusterList,
 }
 
+var clusterRemoveCmd = &cobra.Command{
+	Use:   "remove <name>",
+	Short: "Remove a cluster from the fleet",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runClusterRemove,
+}
+
 func init() {
 	rootCmd.AddCommand(clusterCmd)
 	clusterCmd.AddCommand(clusterAddCmd)
 	clusterCmd.AddCommand(clusterListCmd)
+	clusterCmd.AddCommand(clusterRemoveCmd)
 
 	clusterAddCmd.Flags().StringVar(&clusterArch, "arch", "arm64", "CPU architecture (arm64, amd64)")
 	clusterAddCmd.Flags().StringVar(&clusterInfra, "infra", "cloud", "Infrastructure type (cloud, bare-metal, local)")
@@ -172,6 +180,62 @@ func ClusterList(p ClusterListParams) error {
 	}
 
 	return nil
+}
+
+// ClusterRemoveParams holds all dependencies for ClusterRemove.
+type ClusterRemoveParams struct {
+	Paths    *paths.Resolver
+	Stdout   io.Writer
+	Name     string
+	FleetDir string
+}
+
+// ClusterRemove removes a cluster's overlay directory (and associated secrets)
+// from the fleet repository.
+func ClusterRemove(p ClusterRemoveParams) error {
+	fleetDir := p.Paths.FleetDir(p.FleetDir)
+	clusterDir := filepath.Join(fleetDir, "clusters", p.Name)
+
+	if _, err := os.Stat(clusterDir); os.IsNotExist(err) {
+		return fmt.Errorf("cluster '%s' not found in fleet", p.Name)
+	}
+
+	fmt.Fprintf(p.Stdout, "Removing cluster '%s' from fleet...\n", p.Name)
+
+	if err := os.RemoveAll(clusterDir); err != nil {
+		return fmt.Errorf("failed to remove cluster directory: %w", err)
+	}
+
+	secretsDir := filepath.Join(fleetDir, "secrets", p.Name)
+	if _, err := os.Stat(secretsDir); err == nil {
+		fmt.Fprintf(p.Stdout, "Removing secrets for '%s'...\n", p.Name)
+		if err := os.RemoveAll(secretsDir); err != nil {
+			return fmt.Errorf("failed to remove secrets directory: %w", err)
+		}
+	}
+
+	fmt.Fprintf(p.Stdout, "Cluster '%s' removed.\n", p.Name)
+	hints.Fprint(p.Stdout, []hints.NextStep{
+		{Command: "cluster list", Description: "Verify cluster was removed"},
+		{Command: "status", Description: "Check fleet health"},
+	})
+
+	return nil
+}
+
+func runClusterRemove(cmd *cobra.Command, args []string) error {
+	cfg, _ := config.Load(cfgFile)
+	p := paths.NewWithHome("", cfg)
+	if home, err := os.UserHomeDir(); err == nil {
+		p = paths.NewWithHome(home, cfg)
+	}
+
+	return ClusterRemove(ClusterRemoveParams{
+		Paths:    p,
+		Stdout:   os.Stdout,
+		Name:     args[0],
+		FleetDir: clusterFleetDir,
+	})
 }
 
 func runClusterAdd(cmd *cobra.Command, args []string) error {

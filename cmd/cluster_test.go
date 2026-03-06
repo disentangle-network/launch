@@ -262,6 +262,132 @@ func TestClusterListWithClusters(t *testing.T) {
 	}
 }
 
+func TestClusterRemoveSuccess(t *testing.T) {
+	tmp := t.TempDir()
+	fleetDir := filepath.Join(tmp, "fleet")
+	clusterDir := filepath.Join(fleetDir, "clusters", "doomed")
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Place a file inside so we verify recursive removal
+	if err := os.WriteFile(filepath.Join(clusterDir, "cluster-settings.yaml"), []byte("name: doomed\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := paths.NewWithHome(tmp, nil)
+	var buf bytes.Buffer
+
+	err := ClusterRemove(ClusterRemoveParams{
+		Paths:    p,
+		Stdout:   &buf,
+		Name:     "doomed",
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("ClusterRemove() returned error: %v", err)
+	}
+
+	if _, err := os.Stat(clusterDir); !os.IsNotExist(err) {
+		t.Error("expected cluster directory to be removed, but it still exists")
+	}
+}
+
+func TestClusterRemoveWithSecrets(t *testing.T) {
+	tmp := t.TempDir()
+	fleetDir := filepath.Join(tmp, "fleet")
+	clusterDir := filepath.Join(fleetDir, "clusters", "doomed")
+	secretsDir := filepath.Join(fleetDir, "secrets", "doomed")
+	for _, d := range []string{clusterDir, secretsDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p := paths.NewWithHome(tmp, nil)
+	var buf bytes.Buffer
+
+	err := ClusterRemove(ClusterRemoveParams{
+		Paths:    p,
+		Stdout:   &buf,
+		Name:     "doomed",
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("ClusterRemove() returned error: %v", err)
+	}
+
+	if _, err := os.Stat(clusterDir); !os.IsNotExist(err) {
+		t.Error("expected cluster directory to be removed, but it still exists")
+	}
+	if _, err := os.Stat(secretsDir); !os.IsNotExist(err) {
+		t.Error("expected secrets directory to be removed, but it still exists")
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Removing secrets for 'doomed'") {
+		t.Errorf("expected secrets removal message, got: %s", out)
+	}
+}
+
+func TestClusterRemoveNotFound(t *testing.T) {
+	tmp := t.TempDir()
+	fleetDir := filepath.Join(tmp, "fleet")
+	if err := os.MkdirAll(filepath.Join(fleetDir, "clusters"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	p := paths.NewWithHome(tmp, nil)
+	var buf bytes.Buffer
+
+	err := ClusterRemove(ClusterRemoveParams{
+		Paths:    p,
+		Stdout:   &buf,
+		Name:     "nonexistent",
+		FleetDir: fleetDir,
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent cluster, got nil")
+	}
+	if !strings.Contains(err.Error(), "cluster 'nonexistent' not found in fleet") {
+		t.Errorf("expected 'not found in fleet' error, got: %v", err)
+	}
+}
+
+func TestClusterRemoveOutputMessages(t *testing.T) {
+	tmp := t.TempDir()
+	fleetDir := filepath.Join(tmp, "fleet")
+	if err := os.MkdirAll(filepath.Join(fleetDir, "clusters", "test-cluster"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	p := paths.NewWithHome(tmp, nil)
+	var buf bytes.Buffer
+
+	err := ClusterRemove(ClusterRemoveParams{
+		Paths:    p,
+		Stdout:   &buf,
+		Name:     "test-cluster",
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("ClusterRemove() returned error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Removing cluster 'test-cluster' from fleet...") {
+		t.Errorf("expected removing message, got: %s", out)
+	}
+	if !strings.Contains(out, "Cluster 'test-cluster' removed.") {
+		t.Errorf("expected removed confirmation, got: %s", out)
+	}
+	if !strings.Contains(out, "cluster list") {
+		t.Errorf("expected 'cluster list' hint, got: %s", out)
+	}
+	if !strings.Contains(out, "status") {
+		t.Errorf("expected 'status' hint, got: %s", out)
+	}
+}
+
 func TestClusterListFleetDirResolution(t *testing.T) {
 	tmp := t.TempDir()
 	// Use default path structure: <home>/DISENTANGLE-NETWORK/fleet-deploy

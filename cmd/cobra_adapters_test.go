@@ -183,6 +183,40 @@ func TestRunClusterAddMissingArg(t *testing.T) {
 }
 
 // --------------------------------------------------------------------------
+// runClusterRemove via Cobra
+//
+// ClusterRemove uses filesystem operations only, so it can succeed in
+// tests with proper temp dirs.
+// --------------------------------------------------------------------------
+
+func TestRunClusterRemoveViaCobra(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "clusters", "rm-test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := execRootCmd([]string{
+		"cluster", "remove", "rm-test",
+		"--fleet-dir", tmp,
+	})
+	if err != nil {
+		t.Fatalf("cluster remove returned error: %v", err)
+	}
+
+	// Verify the directory was actually removed
+	if _, err := os.Stat(filepath.Join(tmp, "clusters", "rm-test")); !os.IsNotExist(err) {
+		t.Error("expected cluster directory to be removed")
+	}
+}
+
+func TestRunClusterRemoveMissingArg(t *testing.T) {
+	err := execRootCmd([]string{"cluster", "remove"})
+	if err == nil {
+		t.Fatal("expected error when positional arg is missing")
+	}
+}
+
+// --------------------------------------------------------------------------
 // runClusterList via Cobra
 //
 // ClusterList is pure filesystem, so it succeeds with proper temp dirs.
