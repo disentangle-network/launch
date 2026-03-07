@@ -49,9 +49,9 @@ func TestAddClusterSmallGolden(t *testing.T) {
 		NebulaMode:   "disabled",
 		NebulaPrefix: "10.42.0",
 	})
-	data, err := os.ReadFile(filepath.Join(clusterDir, "cluster-settings.yaml"))
+	data, err := os.ReadFile(filepath.Join(clusterDir, "config", "cluster-settings.yaml"))
 	if err != nil {
-		t.Fatalf("reading cluster-settings.yaml: %v", err)
+		t.Fatalf("reading config/cluster-settings.yaml: %v", err)
 	}
 	assertGolden(t, "testdata/golden/small-cluster-settings.yaml", string(data))
 }
@@ -66,9 +66,9 @@ func TestAddClusterMediumGolden(t *testing.T) {
 		NebulaMode:   "disabled",
 		NebulaPrefix: "10.42.0",
 	})
-	data, err := os.ReadFile(filepath.Join(clusterDir, "cluster-settings.yaml"))
+	data, err := os.ReadFile(filepath.Join(clusterDir, "config", "cluster-settings.yaml"))
 	if err != nil {
-		t.Fatalf("reading cluster-settings.yaml: %v", err)
+		t.Fatalf("reading config/cluster-settings.yaml: %v", err)
 	}
 	assertGolden(t, "testdata/golden/medium-cluster-settings.yaml", string(data))
 }
@@ -83,9 +83,9 @@ func TestAddClusterLargeGolden(t *testing.T) {
 		NebulaMode:   "disabled",
 		NebulaPrefix: "10.42.0",
 	})
-	data, err := os.ReadFile(filepath.Join(clusterDir, "cluster-settings.yaml"))
+	data, err := os.ReadFile(filepath.Join(clusterDir, "config", "cluster-settings.yaml"))
 	if err != nil {
-		t.Fatalf("reading cluster-settings.yaml: %v", err)
+		t.Fatalf("reading config/cluster-settings.yaml: %v", err)
 	}
 	assertGolden(t, "testdata/golden/large-cluster-settings.yaml", string(data))
 }
@@ -122,4 +122,21 @@ func TestAddClusterAppsGolden(t *testing.T) {
 		t.Fatalf("reading apps.yaml: %v", err)
 	}
 	assertGolden(t, "testdata/golden/apps.yaml", string(data))
+}
+
+func TestAddClusterConfigGolden(t *testing.T) {
+	clusterDir := addClusterForGolden(t, ClusterConfig{
+		Name:         "test-cluster",
+		Arch:         "arm64",
+		Infra:        "bare-metal",
+		Nodes:        3,
+		Resources:    "small",
+		NebulaMode:   "disabled",
+		NebulaPrefix: "10.42.0",
+	})
+	data, err := os.ReadFile(filepath.Join(clusterDir, "config.yaml"))
+	if err != nil {
+		t.Fatalf("reading config.yaml: %v", err)
+	}
+	assertGolden(t, "testdata/golden/config.yaml", string(data))
 }

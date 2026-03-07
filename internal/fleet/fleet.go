@@ -141,13 +141,16 @@ func AddCluster(fleetDir string, cfg ClusterConfig) error {
 		return fmt.Errorf("unknown resource preset: %s (valid: small, medium, large)", cfg.Resources)
 	}
 
-	// Create cluster directory
+	// Create cluster directory and config subdirectory
 	clusterDir := filepath.Join(fleetDir, "clusters", cfg.Name)
-	if err := os.MkdirAll(clusterDir, 0750); err != nil {
+	configDir := filepath.Join(clusterDir, "config")
+	if err := os.MkdirAll(configDir, 0750); err != nil {
 		return err
 	}
 
-	// Generate cluster-settings ConfigMap
+	// Generate cluster-settings ConfigMap in config/ subdirectory.
+	// Applied by its own Kustomization CR which depends on apps
+	// (ensuring the disentangle namespace exists first).
 	settingsTmpl := `apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -171,7 +174,13 @@ data:
 		ClusterConfig
 		ResourcePreset
 	}{cfg, preset}
-	if err := renderTemplate(filepath.Join(clusterDir, "cluster-settings.yaml"), settingsTmpl, settingsData); err != nil {
+	if err := renderTemplate(filepath.Join(configDir, "cluster-settings.yaml"), settingsTmpl, settingsData); err != nil {
+		return err
+	}
+
+	// Kustomization for the config/ subdirectory
+	configKustomization := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - cluster-settings.yaml\n"
+	if err := os.WriteFile(filepath.Join(configDir, "kustomization.yaml"), []byte(configKustomization), 0600); err != nil {
 		return err
 	}
 
@@ -212,6 +221,29 @@ spec:
 `, cfg.Name, cfg.Name)
 
 	if err := os.WriteFile(filepath.Join(clusterDir, "apps.yaml"), []byte(appsKustomization), 0600); err != nil {
+		return err
+	}
+
+	// Generate config Kustomization CR -- applies cluster-settings ConfigMap.
+	// Depends on apps so the disentangle namespace exists before the ConfigMap
+	// is created.
+	configFluxKustomization := fmt.Sprintf(`apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: %s-config
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./clusters/%s/config
+  prune: true
+  dependsOn:
+    - name: %s-apps
+`, cfg.Name, cfg.Name, cfg.Name)
+
+	if err := os.WriteFile(filepath.Join(clusterDir, "config.yaml"), []byte(configFluxKustomization), 0600); err != nil {
 		return err
 	}
 

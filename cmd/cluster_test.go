@@ -51,7 +51,7 @@ func TestClusterAddSmall(t *testing.T) {
 	}
 
 	// Verify cluster-settings.yaml
-	settingsPath := filepath.Join(fleetDir, "clusters", "edge-01", "cluster-settings.yaml")
+	settingsPath := filepath.Join(fleetDir, "clusters", "edge-01", "config", "cluster-settings.yaml")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("failed to read cluster-settings.yaml: %v", err)
@@ -103,7 +103,7 @@ func TestClusterAddMedium(t *testing.T) {
 		t.Fatalf("ClusterAdd() returned error: %v", err)
 	}
 
-	settingsPath := filepath.Join(fleetDir, "clusters", "dev", "cluster-settings.yaml")
+	settingsPath := filepath.Join(fleetDir, "clusters", "dev", "config", "cluster-settings.yaml")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		t.Fatalf("failed to read cluster-settings.yaml: %v", err)

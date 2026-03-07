@@ -77,6 +77,7 @@ func TestInitFleetRepo_TemplateFileCopy(t *testing.T) {
 		"apps/base/helmrelease.yaml",
 		"apps/base/namespace.yaml",
 		"apps/base/helm-repository.yaml",
+		"apps/disentangle/kustomization.yaml",
 	}
 	for _, f := range templateFiles {
 		path := filepath.Join(fleetDir, f)
@@ -157,8 +158,8 @@ func TestAddCluster_RenderTemplateError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create the cluster directory, then make it read-only so renderTemplate
-	// cannot create the cluster-settings.yaml file.
+	// Create the cluster directory, then make it read-only so MkdirAll
+	// cannot create the config/ subdirectory.
 	clusterDir := filepath.Join(fleetDir, "clusters", "readonly-cluster")
 	if err := os.MkdirAll(clusterDir, 0750); err != nil {
 		t.Fatal(err)
@@ -289,7 +290,7 @@ func TestAddCluster_AllPresets(t *testing.T) {
 				t.Fatalf("AddCluster(%s) failed: %v", preset, err)
 			}
 
-			data, err := os.ReadFile(filepath.Join(fleetDir, "clusters", "test-"+preset, "cluster-settings.yaml"))
+			data, err := os.ReadFile(filepath.Join(fleetDir, "clusters", "test-"+preset, "config", "cluster-settings.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -417,9 +418,11 @@ func TestAddCluster(t *testing.T) {
 	}
 
 	expectedFiles := []string{
-		"clusters/oci-arm/cluster-settings.yaml",
+		"clusters/oci-arm/config/cluster-settings.yaml",
+		"clusters/oci-arm/config/kustomization.yaml",
 		"clusters/oci-arm/infrastructure.yaml",
 		"clusters/oci-arm/apps.yaml",
+		"clusters/oci-arm/config.yaml",
 	}
 
 	for _, f := range expectedFiles {
@@ -430,7 +433,7 @@ func TestAddCluster(t *testing.T) {
 	}
 
 	// Verify cluster-settings has correct content
-	data, err := os.ReadFile(filepath.Join(fleetDir, "clusters/oci-arm/cluster-settings.yaml"))
+	data, err := os.ReadFile(filepath.Join(fleetDir, "clusters/oci-arm/config/cluster-settings.yaml"))
 	if err != nil {
 		t.Fatalf("failed to read cluster-settings: %v", err)
 	}
@@ -484,11 +487,12 @@ func TestAddCluster_KustomizationPathsExistAfterScaffold(t *testing.T) {
 		t.Fatalf("AddCluster failed: %v", err)
 	}
 
-	// Read infrastructure.yaml and apps.yaml, extract path: values,
-	// and verify those paths exist in the scaffold.
+	// Read infrastructure.yaml, apps.yaml, and config.yaml, extract path:
+	// values, and verify those paths exist in the scaffold.
 	crFiles := []string{
 		filepath.Join(fleetDir, "clusters", cfg.Name, "infrastructure.yaml"),
 		filepath.Join(fleetDir, "clusters", cfg.Name, "apps.yaml"),
+		filepath.Join(fleetDir, "clusters", cfg.Name, "config.yaml"),
 	}
 
 	for _, crFile := range crFiles {
