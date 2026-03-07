@@ -142,6 +142,8 @@ func ClusterAdd(p ClusterAddParams) error {
 	}
 
 	fmt.Fprintf(p.Stdout, "\nCluster '%s' added.\n", p.Name)
+	fmt.Fprintf(p.Stdout, "\nFluxCD reconciles from git -- commit and push your changes:\n")
+	fmt.Fprintf(p.Stdout, "  cd %s && git add -A && git commit -m 'Add cluster %s' && git push\n\n", fleetDir, p.Name)
 	steps := []hints.NextStep{
 		{Command: "secrets init --cluster " + p.Name, Description: "Bootstrap secrets"},
 	}

@@ -162,7 +162,9 @@ func TestStatusKindContextFallback(t *testing.T) {
 	mock.AssertCalled(t, "kubectl --context kind-disentangle-local get ns flux-system")
 }
 
-func TestStatusContextSubstringMatch(t *testing.T) {
+func TestStatusNoSubstringFallback(t *testing.T) {
+	// When exact and prefix matches fail, resolveContext returns the original
+	// name -- it does NOT do substring matching (which would cause false positives).
 	tmp := t.TempDir()
 	fleetDir := filepath.Join(tmp, "fleet")
 	if err := os.MkdirAll(filepath.Join(fleetDir, "clusters", "prod"), 0755); err != nil {
@@ -170,14 +172,13 @@ func TestStatusContextSubstringMatch(t *testing.T) {
 	}
 
 	mock := exec.NewMockExecutor()
-	// resolveContext: exact name fails, kind- prefix fails, substring match succeeds
+	// resolveContext: exact name fails, kind- prefix fails
 	mock.ExpectRun("kubectl config get-contexts prod --no-headers", "",
 		fmt.Errorf("no context named prod"))
 	mock.ExpectRun("kubectl config get-contexts kind-prod --no-headers", "",
 		fmt.Errorf("no context named kind-prod"))
-	mock.ExpectRun("kubectl config get-contexts -o name", "oci-prod-cluster\n", nil)
-	// kubectl commands with resolved context
-	mock.ExpectRun("kubectl --context oci-prod-cluster get ns flux-system", "",
+	// Falls through to original name "prod" (no substring search)
+	mock.ExpectRun("kubectl --context prod get ns flux-system", "",
 		fmt.Errorf("connection refused"))
 
 	p := paths.NewWithHome(tmp, nil)
@@ -197,8 +198,8 @@ func TestStatusContextSubstringMatch(t *testing.T) {
 	if !strings.Contains(out, "=== Cluster: prod ===") {
 		t.Errorf("expected cluster name in output, got: %s", out)
 	}
-	// It resolved to oci-prod-cluster but that context is unreachable
-	mock.AssertCalled(t, "kubectl --context oci-prod-cluster get ns flux-system")
+	// Should use original name, NOT a substring match
+	mock.AssertCalled(t, "kubectl --context prod get ns flux-system")
 }
 
 func TestStatusFleetDirResolution(t *testing.T) {

@@ -292,11 +292,13 @@ func TestRunClusterImportMissingArgs(t *testing.T) {
 func TestRunFleetInitViaCobra(t *testing.T) {
 	tmp := t.TempDir()
 	fleetDir := filepath.Join(tmp, "fleet-deploy-new")
+	cfgPath := filepath.Join(tmp, "config.yaml")
 
 	err := execRootCmd([]string{
 		"fleet", "init",
 		"--dir", fleetDir,
 		"--remote", "git@github.com:test/fleet.git",
+		"--config", cfgPath,
 	})
 	// The adapter was entered.  git clone may succeed (network) or fail.
 	if err != nil {
@@ -581,7 +583,10 @@ func TestBuildInfraParams(t *testing.T) {
 // --------------------------------------------------------------------------
 
 func TestRunSetupViaCobra(t *testing.T) {
-	err := execRootCmd([]string{"setup", "--dry-run", "--yes"})
+	tmp := t.TempDir()
+	cfgPath := filepath.Join(tmp, "config.yaml")
+
+	err := execRootCmd([]string{"setup", "--dry-run", "--yes", "--config", cfgPath})
 	// Setup may error if resolving paths fails (unlikely) or if
 	// downstream logic encounters unexpected conditions.
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
@@ -113,28 +112,19 @@ func runStatus(cmd *cobra.Command, args []string) error {
 }
 
 // resolveContext finds a working kubectl context for the given cluster name.
-// It tries the name as-is first, then falls back to common prefixes (e.g. "kind-").
-// If no context responds, it returns the original name so the caller gets a
+// It tries the name as-is first, then falls back to known prefixes (kind-).
+// If no context matches, it returns the original name so the caller gets a
 // clear "cluster unreachable" error.
 func resolveContext(e exec.Executor, name string) string {
 	// Try exact name first
 	if _, err := e.RunSilent("kubectl", "config", "get-contexts", name, "--no-headers"); err == nil {
 		return name
 	}
-	// Try common prefixes
+	// Try known prefixes
 	for _, prefix := range []string{"kind-"} {
 		candidate := prefix + name
 		if _, err := e.RunSilent("kubectl", "config", "get-contexts", candidate, "--no-headers"); err == nil {
 			return candidate
-		}
-	}
-	// Also check if a context contains the name as a substring
-	if out, err := e.RunSilent("kubectl", "config", "get-contexts", "-o", "name"); err == nil {
-		for _, line := range strings.Split(strings.TrimSpace(out.Stdout), "\n") {
-			ctx := strings.TrimSpace(line)
-			if ctx != "" && strings.Contains(ctx, name) {
-				return ctx
-			}
 		}
 	}
 	return name
