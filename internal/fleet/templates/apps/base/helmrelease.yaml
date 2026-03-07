@@ -17,7 +17,7 @@ spec:
   values:
     image:
       repository: ghcr.io/disentangle-network/disentangle-node
-      tag: v0.4.0
+      tag: v0.4.1
     nodes:
       count: 3
     persistence:

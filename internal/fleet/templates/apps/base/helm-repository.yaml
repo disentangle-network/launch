@@ -7,4 +7,4 @@ metadata:
 spec:
   type: oci
   interval: 1h
-  url: oci://ghcr.io/disentangle-network
+  url: oci://ghcr.io/disentangle-network/charts
