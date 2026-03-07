@@ -5,11 +5,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/paths"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var secretsCmd = &cobra.Command{
@@ -65,10 +67,10 @@ type SecretsInitParams struct {
 
 // SecretsInit initializes secrets for a cluster using the specified KMS provider.
 func SecretsInit(p SecretsInitParams) error {
-	// Verify cluster exists
+	// Warn if cluster directory doesn't exist yet (secrets init can run before cluster add)
 	clusterDir := p.Paths.FleetClusterDir(p.FleetDir, p.Cluster)
 	if _, err := os.Stat(clusterDir); os.IsNotExist(err) {
-		return fmt.Errorf("cluster '%s' not found (run 'launch cluster add %s' first)", p.Cluster, p.Cluster)
+		fmt.Fprintf(p.Stdout, "Note: cluster '%s' not yet added to fleet (run 'launch cluster add %s' when ready)\n", p.Cluster, p.Cluster)
 	}
 
 	// Create secrets directory
@@ -99,10 +101,21 @@ func SecretsInit(p SecretsInitParams) error {
 			fmt.Fprintf(p.Stdout, "Public key: %s\n", result.Stdout)
 		}
 
-		// Update .sops.yaml
-		fmt.Fprintf(p.Stdout, "\nAdd this to %s/.sops.yaml:\n", p.FleetDir)
-		fmt.Fprintf(p.Stdout, "  - path_regex: secrets/%s/.*\n", p.Cluster)
-		fmt.Fprintf(p.Stdout, "    age: <public-key-from-above>\n")
+		// Auto-update .sops.yaml
+		pubKey := extractAgePublicKey(result)
+		if pubKey != "" {
+			if err := appendSOPSRule(p.FleetDir, p.Cluster, pubKey); err != nil {
+				fmt.Fprintf(p.Stdout, "Warning: could not update .sops.yaml: %v\n", err)
+				fmt.Fprintf(p.Stdout, "Manually add to %s/.sops.yaml: path_regex: secrets/%s/.*, age: %s\n",
+					p.FleetDir, p.Cluster, pubKey)
+			} else {
+				fmt.Fprintf(p.Stdout, "Updated %s/.sops.yaml with creation rule for cluster '%s'\n", p.FleetDir, p.Cluster)
+			}
+		} else {
+			fmt.Fprintf(p.Stdout, "\nCould not extract public key from age-keygen output\n")
+			fmt.Fprintf(p.Stdout, "Manually add to %s/.sops.yaml: path_regex: secrets/%s/.*\n",
+				p.FleetDir, p.Cluster)
+		}
 
 	case "local":
 		// PQ hybrid envelope via genesis-operator CLI
@@ -135,16 +148,31 @@ func SecretsInit(p SecretsInitParams) error {
 			fmt.Fprintln(p.Stdout, result.Stdout)
 		}
 
-		// Read the generated .sops.yaml to extract the age public key
+		// Auto-update fleet root .sops.yaml from genesis output
 		clusterSopsPath := filepath.Join(secretsDir, ".sops.yaml")
 		sopsData, err := os.ReadFile(filepath.Clean(clusterSopsPath))
 		if err != nil {
 			fmt.Fprintf(p.Stdout, "Warning: could not read generated .sops.yaml: %v\n", err)
 			fmt.Fprintf(p.Stdout, "Manually add the age public key to %s/.sops.yaml\n", p.FleetDir)
 		} else {
-			fmt.Fprintf(p.Stdout, "\nGenerated SOPS config:\n%s\n", string(sopsData))
-			fmt.Fprintf(p.Stdout, "Merge the age key into %s/.sops.yaml with path_regex: secrets/%s/.*\n",
-				p.FleetDir, p.Cluster)
+			// Extract age key from genesis-generated sops config
+			var genCfg sopsConfig
+			if parseErr := yaml.Unmarshal(sopsData, &genCfg); parseErr == nil {
+				for _, rule := range genCfg.CreationRules {
+					if rule.Age != "" {
+						if appendErr := appendSOPSRule(p.FleetDir, p.Cluster, rule.Age); appendErr != nil {
+							fmt.Fprintf(p.Stdout, "Warning: could not update .sops.yaml: %v\n", appendErr)
+						} else {
+							fmt.Fprintf(p.Stdout, "Updated %s/.sops.yaml with creation rule for cluster '%s'\n",
+								p.FleetDir, p.Cluster)
+						}
+						break
+					}
+				}
+			} else {
+				fmt.Fprintf(p.Stdout, "Warning: could not parse generated .sops.yaml: %v\n", parseErr)
+				fmt.Fprintf(p.Stdout, "Manually merge into %s/.sops.yaml\n", p.FleetDir)
+			}
 		}
 
 	case "yubikey":
@@ -172,6 +200,77 @@ func SecretsInit(p SecretsInitParams) error {
 	fmt.Fprintf(p.Stdout, "\nSecrets initialized for cluster '%s'\n", p.Cluster)
 	fmt.Fprintf(p.Stdout, "Next: launch bootstrap --cluster %s\n", p.Cluster)
 	return nil
+}
+
+// sopsConfig represents a .sops.yaml file structure.
+type sopsConfig struct {
+	CreationRules []sopsRule `yaml:"creation_rules"`
+}
+
+type sopsRule struct {
+	PathRegex string `yaml:"path_regex"`
+	Age       string `yaml:"age,omitempty"`
+}
+
+// appendSOPSRule adds a creation rule to the fleet root .sops.yaml.
+// If the file doesn't exist, it creates one. If a rule with the same
+// path_regex already exists, it updates the age key.
+func appendSOPSRule(fleetDir, cluster, agePublicKey string) error {
+	sopsPath := filepath.Join(fleetDir, ".sops.yaml")
+
+	var cfg sopsConfig
+	data, err := os.ReadFile(filepath.Clean(sopsPath))
+	if err == nil {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("failed to parse %s: %w", sopsPath, err)
+		}
+	}
+
+	pathRegex := fmt.Sprintf("secrets/%s/.*", cluster)
+
+	// Check if rule already exists
+	found := false
+	for i, rule := range cfg.CreationRules {
+		if rule.PathRegex == pathRegex {
+			cfg.CreationRules[i].Age = agePublicKey
+			found = true
+			break
+		}
+	}
+	if !found {
+		cfg.CreationRules = append(cfg.CreationRules, sopsRule{
+			PathRegex: pathRegex,
+			Age:       agePublicKey,
+		})
+	}
+
+	out, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal .sops.yaml: %w", err)
+	}
+
+	return os.WriteFile(sopsPath, out, 0600)
+}
+
+// extractAgePublicKey parses the age public key from age-keygen output.
+// age-keygen outputs: "# public key: age1..." on stderr or stdout.
+func extractAgePublicKey(result *exec.Result) string {
+	if result == nil {
+		return ""
+	}
+	for _, output := range []string{result.Stdout, result.Stderr} {
+		for _, line := range strings.Split(output, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "# public key: ") {
+				return strings.TrimPrefix(line, "# public key: ")
+			}
+			// Also handle bare public key output
+			if strings.HasPrefix(line, "age1") && !strings.Contains(line, " ") {
+				return line
+			}
+		}
+	}
+	return ""
 }
 
 func runSecretsInit(cmd *cobra.Command, args []string) error {

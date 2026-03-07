@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pflag "github.com/spf13/pflag"
 )
 
 // resetRootCmd resets the output, args, and key package-level flag
@@ -61,6 +63,9 @@ func resetRootCmd() {
 	statusFleetDir = ""
 
 	doctorFleetDir = ""
+
+	// Reset cobra flag Changed state so MarkFlagRequired checks work correctly.
+	secretsInitCmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
 }
 
 // execRootCmd is a small helper that resets state, sets args, captures
