@@ -26,8 +26,11 @@ func TestDoctorNoConfig(t *testing.T) {
 		CfgFile:  filepath.Join(tmp, "nonexistent-config.yaml"),
 		Verbose:  false,
 	})
-	if err != nil {
-		t.Fatalf("Doctor() returned unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("Doctor() should return error when checks fail")
+	}
+	if !strings.Contains(err.Error(), "failing check") {
+		t.Errorf("unexpected error: %v", err)
 	}
 
 	output := buf.String()
@@ -161,8 +164,8 @@ func TestDoctorOutputFormat(t *testing.T) {
 		CfgFile:  filepath.Join(tmp, "no-config.yaml"),
 		Verbose:  false,
 	})
-	if err != nil {
-		t.Fatalf("Doctor() returned unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("Doctor() should return error when checks fail")
 	}
 
 	output := buf.String()
@@ -192,9 +195,73 @@ func TestDoctorViaCobra(t *testing.T) {
 	tmp := t.TempDir()
 
 	err := execRootCmd([]string{"doctor", "--fleet-dir", tmp})
-	// Doctor should not return an error -- it reports issues in output.
+	// Doctor should return an error when checks fail.
+	if err == nil {
+		t.Fatal("expected doctor to return error for failing checks")
+	}
+}
+
+func TestDoctorWarningsOnly(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Set up fleet structure with .git and apps/base but no clusters
+	// (clusters check returns "warn", secrets check returns "warn")
+	fleetDir := filepath.Join(tmp, "fleet")
+	dirs := []string{
+		filepath.Join(fleetDir, ".git"),
+		filepath.Join(fleetDir, "apps", "base"),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create valid config file
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	cfg := &config.Config{FleetDir: fleetDir}
+	if err := config.Save(cfg, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create nebula CA key so Mesh CA passes
+	nebulaDir := filepath.Join(tmp, ".config", "disentangle", "nebula-ca")
+	if err := os.MkdirAll(nebulaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nebulaDir, "ca.key"), []byte("fake-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Mock executor returns errors by default, so credentials check => "warn"
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(tmp, cfg)
+
+	var buf bytes.Buffer
+	err := Doctor(DoctorParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		FleetDir: fleetDir,
+		CfgFile:  cfgPath,
+		Verbose:  false,
+	})
+
+	// Warnings only -- Doctor should return nil
 	if err != nil {
-		t.Fatalf("doctor via cobra returned error: %v", err)
+		t.Fatalf("Doctor() returned unexpected error for warnings-only scenario: %v", err)
+	}
+
+	output := buf.String()
+
+	// Should have no FAIL entries
+	if strings.Contains(output, "FAIL") {
+		t.Errorf("expected no FAIL entries in warnings-only scenario, got:\n%s", output)
+	}
+
+	// Should have 0 failures in summary
+	if !strings.Contains(output, "0 failures.") {
+		t.Errorf("expected '0 failures.' in summary, got:\n%s", output)
 	}
 }
 

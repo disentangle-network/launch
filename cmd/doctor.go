@@ -115,6 +115,9 @@ func Doctor(p DoctorParams) error {
 	fmt.Fprintln(p.Stdout)
 	fmt.Fprintf(p.Stdout, "%d checks passed, %d warnings, %d failures.\n", passed, warnings, failures)
 
+	if failures > 0 {
+		return fmt.Errorf("doctor found %d failing check(s)", failures)
+	}
 	return nil
 }
 
