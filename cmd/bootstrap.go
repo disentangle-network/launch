@@ -145,18 +145,24 @@ func Bootstrap(p BootstrapParams) error {
 
 		secretsDir := filepath.Join(p.FleetDir, "secrets", p.Cluster)
 
-		// Find age identity: prefer genesis identity file, fall back to raw age.key
+		// Find age identity: prefer genesis identity file, fall back to legacy names
 		var ageKeyPath string
 		var keySource string
-		genesisIdentity := filepath.Join(secretsDir, "age-identity.txt")
-		legacyAgeKey := filepath.Join(secretsDir, "age.key")
-
-		if _, err := os.Stat(genesisIdentity); err == nil {
-			ageKeyPath = genesisIdentity
-			keySource = "genesis PQ hybrid"
-		} else if _, err := os.Stat(legacyAgeKey); err == nil {
-			ageKeyPath = legacyAgeKey
-			keySource = "age (classical)"
+		candidates := []struct {
+			filename string
+			source   string
+		}{
+			{"genesis-identity.key", "genesis PQ hybrid"},
+			{"age-identity.txt", "genesis PQ hybrid"},
+			{"age.key", "age (classical)"},
+		}
+		for _, c := range candidates {
+			path := filepath.Join(secretsDir, c.filename)
+			if _, err := os.Stat(path); err == nil {
+				ageKeyPath = path
+				keySource = c.source
+				break
+			}
 		}
 
 		if ageKeyPath != "" {
