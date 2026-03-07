@@ -165,6 +165,10 @@ func InfraInit(p InfraParams) error {
 	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
 	}
+	if p.DryRun {
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu init -upgrade")
+		return nil
+	}
 	fmt.Fprintln(p.Stdout, "Initializing Terraform...")
 	if _, err := p.Exec.Run("tofu", "init", "-upgrade"); err != nil {
 		return err
@@ -179,6 +183,11 @@ func InfraInit(p InfraParams) error {
 func InfraPlan(p InfraParams) error {
 	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
+	}
+	if p.DryRun {
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu init -upgrade")
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu plan -var-file=terraform.tfvars -out=tfplan")
+		return nil
 	}
 	fmt.Fprintln(p.Stdout, "Initializing...")
 	if _, err := p.Exec.Run("tofu", "init", "-upgrade"); err != nil {
@@ -200,6 +209,13 @@ func InfraApply(p InfraParams) error {
 	_, envDir, err := resolveInfraParams(&p)
 	if err != nil {
 		return err
+	}
+
+	if p.DryRun {
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu plan -var-file=terraform.tfvars -out=tfplan")
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu apply tfplan")
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu output -json")
+		return nil
 	}
 
 	planFile := filepath.Join(envDir, "tfplan")
@@ -240,6 +256,11 @@ func InfraDestroy(p InfraParams) error {
 		return err
 	}
 
+	if p.DryRun {
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu destroy -var-file=terraform.tfvars")
+		return nil
+	}
+
 	if !infraConfirm(p, "DESTROY all infrastructure? This cannot be undone.") {
 		fmt.Fprintln(p.Stdout, "Cancelled.")
 		return nil
@@ -254,6 +275,10 @@ func InfraOutput(p InfraParams) error {
 	if _, _, err := resolveInfraParams(&p); err != nil {
 		return err
 	}
+	if p.DryRun {
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu output -json")
+		return nil
+	}
 	_, err := p.Exec.Run("tofu", "output", "-json")
 	return err
 }
@@ -263,6 +288,12 @@ func InfraKubeconfig(p InfraParams) error {
 	infraRoot, _, err := resolveInfraParams(&p)
 	if err != nil {
 		return err
+	}
+
+	if p.DryRun {
+		fmt.Fprintln(p.Stdout, "[dry-run] tofu output -raw cluster_id")
+		fmt.Fprintf(p.Stdout, "[dry-run] oci ce cluster create-kubeconfig --file %s\n", filepath.Join(infraRoot, "kubeconfig"))
+		return nil
 	}
 
 	result, err := p.Exec.RunSilent("tofu", "output", "-raw", "cluster_id")

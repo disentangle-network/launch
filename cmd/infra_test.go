@@ -42,7 +42,7 @@ func newTestInfraParams(t *testing.T) (InfraParams, *exec.MockExecutor, string) 
 		Stdout:            &buf,
 		Env:               "dev",
 		Dir:               tmp,
-		DryRun:            true, // default to dry-run so token resolution is skipped
+		DryRun:            false,
 		ConfirmFunc:       func(string) bool { return true },
 		TokenResolverFunc: mockToken("test-cf-token", "mock"),
 	}
@@ -267,7 +267,6 @@ func TestInfraDirResolution(t *testing.T) {
 			pr := paths.NewWithHome(tmp, cfg)
 
 			mock := exec.NewMockExecutor()
-			mock.ExpectRun("tofu output -json", "", nil)
 
 			var buf bytes.Buffer
 			p := InfraParams{
@@ -325,7 +324,6 @@ func TestInfraEnvDirNotFound(t *testing.T) {
 
 func TestInfraTokenResolution(t *testing.T) {
 	p, mock, _ := newTestInfraParams(t)
-	p.DryRun = false
 	p.TokenResolverFunc = mockToken("my-secret-token", "test-source")
 	mock.ExpectRun("tofu output -json", "", nil)
 
@@ -366,7 +364,6 @@ func mockTokenError(errMsg string) func() (string, string, error) {
 
 func TestInfraTokenResolutionError(t *testing.T) {
 	p, _, _ := newTestInfraParams(t)
-	p.DryRun = false
 	p.TokenResolverFunc = mockTokenError("no cloudflare token found")
 
 	err := InfraOutput(p)
@@ -596,6 +593,135 @@ func TestInfraKubeconfigCustomRegion(t *testing.T) {
 	out := p.Stdout.(*bytes.Buffer).String() //nolint:errcheck // test type assertion
 	if !strings.Contains(out, "Kubeconfig saved to") {
 		t.Errorf("expected 'Kubeconfig saved to' in output, got: %s", out)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dry-run tests: verify no tofu commands are executed
+// ---------------------------------------------------------------------------
+
+func TestInfraInitDryRun(t *testing.T) {
+	p, mock, _ := newTestInfraParams(t)
+	p.DryRun = true
+
+	if err := InfraInit(p); err != nil {
+		t.Fatalf("InfraInit dry-run: %v", err)
+	}
+
+	// No tofu commands should have been called
+	for _, c := range mock.Calls {
+		if strings.HasPrefix(c.CommandString(), "tofu") {
+			t.Errorf("dry-run should not execute tofu, got: %s", c.CommandString())
+		}
+	}
+
+	out := p.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "[dry-run] tofu init") {
+		t.Errorf("expected dry-run init message, got: %s", out)
+	}
+}
+
+func TestInfraPlanDryRun(t *testing.T) {
+	p, mock, _ := newTestInfraParams(t)
+	p.DryRun = true
+
+	if err := InfraPlan(p); err != nil {
+		t.Fatalf("InfraPlan dry-run: %v", err)
+	}
+
+	for _, c := range mock.Calls {
+		if strings.HasPrefix(c.CommandString(), "tofu") {
+			t.Errorf("dry-run should not execute tofu, got: %s", c.CommandString())
+		}
+	}
+
+	out := p.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "[dry-run] tofu plan") {
+		t.Errorf("expected dry-run plan message, got: %s", out)
+	}
+}
+
+func TestInfraApplyDryRun(t *testing.T) {
+	p, mock, _ := newTestInfraParams(t)
+	p.DryRun = true
+
+	if err := InfraApply(p); err != nil {
+		t.Fatalf("InfraApply dry-run: %v", err)
+	}
+
+	for _, c := range mock.Calls {
+		if strings.HasPrefix(c.CommandString(), "tofu") {
+			t.Errorf("dry-run should not execute tofu, got: %s", c.CommandString())
+		}
+	}
+
+	out := p.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "[dry-run] tofu apply") {
+		t.Errorf("expected dry-run apply message, got: %s", out)
+	}
+}
+
+func TestInfraDestroyDryRun(t *testing.T) {
+	p, mock, _ := newTestInfraParams(t)
+	p.DryRun = true
+
+	if err := InfraDestroy(p); err != nil {
+		t.Fatalf("InfraDestroy dry-run: %v", err)
+	}
+
+	for _, c := range mock.Calls {
+		if strings.HasPrefix(c.CommandString(), "tofu") {
+			t.Errorf("dry-run should not execute tofu, got: %s", c.CommandString())
+		}
+	}
+
+	out := p.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "[dry-run] tofu destroy") {
+		t.Errorf("expected dry-run destroy message, got: %s", out)
+	}
+}
+
+func TestInfraOutputDryRun(t *testing.T) {
+	p, mock, _ := newTestInfraParams(t)
+	p.DryRun = true
+
+	if err := InfraOutput(p); err != nil {
+		t.Fatalf("InfraOutput dry-run: %v", err)
+	}
+
+	for _, c := range mock.Calls {
+		if strings.HasPrefix(c.CommandString(), "tofu") {
+			t.Errorf("dry-run should not execute tofu, got: %s", c.CommandString())
+		}
+	}
+
+	out := p.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "[dry-run] tofu output") {
+		t.Errorf("expected dry-run output message, got: %s", out)
+	}
+}
+
+func TestInfraKubeconfigDryRun(t *testing.T) {
+	p, mock, _ := newTestInfraParams(t)
+	p.DryRun = true
+
+	if err := InfraKubeconfig(p); err != nil {
+		t.Fatalf("InfraKubeconfig dry-run: %v", err)
+	}
+
+	for _, c := range mock.Calls {
+		cmd := c.CommandString()
+		if strings.HasPrefix(cmd, "tofu") || strings.HasPrefix(cmd, "oci") {
+			t.Errorf("dry-run should not execute tofu/oci, got: %s", cmd)
+		}
+	}
+
+	out := p.Stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "[dry-run] tofu output -raw cluster_id") {
+		t.Errorf("expected dry-run cluster_id message, got: %s", out)
+	}
+	if !strings.Contains(out, "[dry-run] oci ce cluster create-kubeconfig") {
+		t.Errorf("expected dry-run oci message, got: %s", out)
 	}
 }
 
