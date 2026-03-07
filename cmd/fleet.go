@@ -125,7 +125,10 @@ func FleetInit(p FleetInitParams) error {
 	}
 	if cfg != nil {
 		cfg.FleetDir = dir
-		cfgPath, _ := config.DefaultConfigPath()
+		cfgPath := p.CfgFile
+		if cfgPath == "" {
+			cfgPath, _ = config.DefaultConfigPath()
+		}
 		if err := config.Save(cfg, cfgPath); err != nil {
 			fmt.Fprintf(p.Stdout, "Warning: could not save config: %v\n", err)
 		}

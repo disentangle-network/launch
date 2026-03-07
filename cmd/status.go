@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
@@ -58,10 +59,13 @@ func Status(p StatusParams) error {
 		name := e.Name()
 		fmt.Fprintf(p.Stdout, "=== Cluster: %s ===\n", name)
 
+		// Resolve kubectl context: try the cluster name, then common prefixes
+		ctx := resolveContext(p.Exec, name)
+
 		// Try to get flux status
-		if _, err := p.Exec.RunSilent("kubectl", "--context", name, "get", "ns", "flux-system"); err == nil {
+		if _, err := p.Exec.RunSilent("kubectl", "--context", ctx, "get", "ns", "flux-system"); err == nil {
 			fmt.Fprintln(p.Stdout, "  FluxCD:")
-			if out, err := p.Exec.RunSilent("flux", "--context", name, "get", "all", "-A", "--no-header"); err == nil {
+			if out, err := p.Exec.RunSilent("flux", "--context", ctx, "get", "all", "-A", "--no-header"); err == nil {
 				for _, line := range splitLines(out.Stdout) {
 					if line != "" {
 						fmt.Fprintf(p.Stdout, "    %s\n", line)
@@ -72,7 +76,7 @@ func Status(p StatusParams) error {
 			}
 
 			fmt.Fprintln(p.Stdout, "  Disentangle pods:")
-			if out, err := p.Exec.RunSilent("kubectl", "--context", name, "get", "pods", "-n", "disentangle", "-o", "wide", "--no-headers"); err == nil {
+			if out, err := p.Exec.RunSilent("kubectl", "--context", ctx, "get", "pods", "-n", "disentangle", "-o", "wide", "--no-headers"); err == nil {
 				if out.Stdout == "" {
 					fmt.Fprintln(p.Stdout, "    No pods in disentangle namespace")
 				} else {
@@ -106,6 +110,34 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		Stdout:   os.Stdout,
 		FleetDir: statusFleetDir,
 	})
+}
+
+// resolveContext finds a working kubectl context for the given cluster name.
+// It tries the name as-is first, then falls back to common prefixes (e.g. "kind-").
+// If no context responds, it returns the original name so the caller gets a
+// clear "cluster unreachable" error.
+func resolveContext(e exec.Executor, name string) string {
+	// Try exact name first
+	if _, err := e.RunSilent("kubectl", "config", "get-contexts", name, "--no-headers"); err == nil {
+		return name
+	}
+	// Try common prefixes
+	for _, prefix := range []string{"kind-"} {
+		candidate := prefix + name
+		if _, err := e.RunSilent("kubectl", "config", "get-contexts", candidate, "--no-headers"); err == nil {
+			return candidate
+		}
+	}
+	// Also check if a context contains the name as a substring
+	if out, err := e.RunSilent("kubectl", "config", "get-contexts", "-o", "name"); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(out.Stdout), "\n") {
+			ctx := strings.TrimSpace(line)
+			if ctx != "" && strings.Contains(ctx, name) {
+				return ctx
+			}
+		}
+	}
+	return name
 }
 
 func splitLines(s string) []string {

@@ -24,12 +24,14 @@ func TestFleetInitCloneSequence(t *testing.T) {
 	mock.ExpectRun("gh api user --jq .login", "testuser\n", nil)
 	mock.ExpectRun("gh repo create testuser/fleet-deploy --private --source "+fleetDir+" --push", "", nil)
 
+	cfgPath := filepath.Join(tmp, "config.yaml")
 	var buf bytes.Buffer
 	p := FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		CfgFile: cfgPath,
 	}
 
 	err := FleetInit(p)
@@ -105,13 +107,15 @@ func TestFleetInitWithExplicitRemote(t *testing.T) {
 	mock.ExpectRun("git remote add template https://github.com/disentangle-network/fleet.git", "", nil)
 	mock.ExpectRun("git remote add origin git@github.com:myorg/my-fleet.git", "", nil)
 
+	cfgPath := filepath.Join(tmp, "config.yaml")
 	var buf bytes.Buffer
 	p := FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
-		Remote: "git@github.com:myorg/my-fleet.git",
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		Remote:  "git@github.com:myorg/my-fleet.git",
+		CfgFile: cfgPath,
 	}
 
 	err := FleetInit(p)
@@ -227,12 +231,14 @@ func TestFleetInitCloneFails(t *testing.T) {
 		fmt.Errorf("exit status 128"),
 	)
 
+	cfgPath := filepath.Join(tmp, "config.yaml")
 	var buf bytes.Buffer
 	err := FleetInit(FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		CfgFile: cfgPath,
 	})
 	if err == nil {
 		t.Fatal("expected error for clone failure, got nil")
@@ -256,12 +262,14 @@ func TestFleetInitGhUserDetectionFails(t *testing.T) {
 		fmt.Errorf("exit status 1"),
 	)
 
+	cfgPath := filepath.Join(tmp, "config.yaml")
 	var buf bytes.Buffer
 	err := FleetInit(FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		CfgFile: cfgPath,
 	})
 	if err != nil {
 		t.Fatalf("FleetInit should not error on gh user failure: %v", err)
@@ -287,12 +295,14 @@ func TestFleetInitGhUserEmptyStdout(t *testing.T) {
 	// gh api user returns empty string
 	mock.ExpectRun("gh api user --jq .login", "  \n", nil)
 
+	cfgPath := filepath.Join(tmp, "config.yaml")
 	var buf bytes.Buffer
 	err := FleetInit(FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		CfgFile: cfgPath,
 	})
 	if err != nil {
 		t.Fatalf("FleetInit should not error on empty gh user: %v", err)
@@ -320,12 +330,14 @@ func TestFleetInitGhRepoCreateFails(t *testing.T) {
 		fmt.Errorf("exit status 1"),
 	)
 
+	cfgPath := filepath.Join(tmp, "config.yaml")
 	var buf bytes.Buffer
 	err := FleetInit(FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		CfgFile: cfgPath,
 	})
 	if err != nil {
 		t.Fatalf("FleetInit should not error on repo create failure: %v", err)
@@ -577,14 +589,16 @@ func TestFleetInitUsesGitHubOrg(t *testing.T) {
 	mock.ExpectRun("gh repo create disentangle-network/fleet-deploy --private --source "+fleetDir+" --push", "", nil)
 
 	cfg := &config.Config{GitHubOrg: "disentangle-network"}
+	cfgPath := filepath.Join(tmp, "config.yaml")
 
 	var buf bytes.Buffer
 	err := FleetInit(FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
-		Config: cfg,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		Config:  cfg,
+		CfgFile: cfgPath,
 	})
 	if err != nil {
 		t.Fatalf("FleetInit returned error: %v", err)
@@ -619,14 +633,16 @@ func TestFleetInitFallsBackToGhUser(t *testing.T) {
 
 	// Empty GitHubOrg -- should fall back to gh api user
 	cfg := &config.Config{GitHubOrg: ""}
+	cfgPath := filepath.Join(tmp, "config.yaml")
 
 	var buf bytes.Buffer
 	err := FleetInit(FleetInitParams{
-		Exec:   mock,
-		Paths:  paths.NewWithHome(tmp, nil),
-		Stdout: &buf,
-		Dir:    fleetDir,
-		Config: cfg,
+		Exec:    mock,
+		Paths:   paths.NewWithHome(tmp, nil),
+		Stdout:  &buf,
+		Dir:     fleetDir,
+		Config:  cfg,
+		CfgFile: cfgPath,
 	})
 	if err != nil {
 		t.Fatalf("FleetInit returned error: %v", err)
