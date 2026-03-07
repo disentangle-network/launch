@@ -724,14 +724,21 @@ func TestExtractAgePublicKey(t *testing.T) {
 		want   string
 	}{
 		{
-			name: "standard age-keygen output",
+			name: "age-keygen v1.3+ format on stderr",
+			result: &exec.Result{
+				Stderr: "Public key: age1t65wxyqk7ypcxxk42ak5fqnvt5rr387pm2g6x46n2k9u0yf3fanqw43vkw\n",
+			},
+			want: "age1t65wxyqk7ypcxxk42ak5fqnvt5rr387pm2g6x46n2k9u0yf3fanqw43vkw",
+		},
+		{
+			name: "old age-keygen comment format",
 			result: &exec.Result{
 				Stdout: "# created: 2024-01-01T00:00:00Z\n# public key: age1abc123def456\nAGE-SECRET-KEY-1...\n",
 			},
 			want: "age1abc123def456",
 		},
 		{
-			name: "public key on stderr",
+			name: "public key on stderr with comment prefix",
 			result: &exec.Result{
 				Stderr: "# public key: age1stderrkey789\n",
 			},
@@ -865,5 +872,65 @@ func TestAppendSOPSRule_UpdateExisting(t *testing.T) {
 	count := strings.Count(content, "secrets/my-cluster/.*")
 	if count != 1 {
 		t.Errorf("should have exactly 1 rule for my-cluster, found %d in: %s", count, content)
+	}
+}
+
+func TestSecretsInitAgeV13Format(t *testing.T) {
+	// age-keygen v1.3+ outputs "Public key: age1..." on stderr (no # prefix)
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "v13-cluster"
+
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	keyPath := filepath.Join(secretsDir, "age.key")
+
+	// Simulate v1.3+ output: "Public key:" on stderr, no stdout
+	mock.ExpectRunWithResult(
+		fmt.Sprintf("age-keygen -o %s", keyPath),
+		&exec.Result{
+			Command: "age-keygen",
+			Stderr:  "Public key: age1realv13publickey\n",
+		},
+		nil,
+	)
+
+	var buf bytes.Buffer
+	err := SecretsInit(SecretsInitParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		Provider: "age",
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("SecretsInit returned error: %v", err)
+	}
+
+	// Verify .sops.yaml was created with the extracted key
+	sopsPath := filepath.Join(fleetDir, ".sops.yaml")
+	sopsData, err := os.ReadFile(sopsPath)
+	if err != nil {
+		t.Fatalf(".sops.yaml not created: %v", err)
+	}
+	sopsContent := string(sopsData)
+	if !strings.Contains(sopsContent, "age1realv13publickey") {
+		t.Errorf(".sops.yaml should contain the v1.3 public key, got: %s", sopsContent)
+	}
+	if !strings.Contains(sopsContent, "secrets/v13-cluster/.*") {
+		t.Errorf(".sops.yaml should contain path_regex, got: %s", sopsContent)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Updated") {
+		t.Errorf("output should mention 'Updated', got: %s", output)
 	}
 }

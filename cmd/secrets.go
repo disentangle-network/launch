@@ -253,7 +253,8 @@ func appendSOPSRule(fleetDir, cluster, agePublicKey string) error {
 }
 
 // extractAgePublicKey parses the age public key from age-keygen output.
-// age-keygen outputs: "# public key: age1..." on stderr or stdout.
+// age-keygen v1.3+ outputs "Public key: age1..." to stderr.
+// Older versions output "# public key: age1..." as a comment.
 func extractAgePublicKey(result *exec.Result) string {
 	if result == nil {
 		return ""
@@ -261,10 +262,17 @@ func extractAgePublicKey(result *exec.Result) string {
 	for _, output := range []string{result.Stdout, result.Stderr} {
 		for _, line := range strings.Split(output, "\n") {
 			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "# public key: ") {
-				return strings.TrimPrefix(line, "# public key: ")
+			// Strip leading # comment prefix if present (older age-keygen)
+			stripped := strings.TrimPrefix(line, "# ")
+			// Case-insensitive match for "public key: age1..."
+			lower := strings.ToLower(stripped)
+			if strings.HasPrefix(lower, "public key: ") {
+				key := stripped[len("public key: "):]
+				if strings.HasPrefix(key, "age1") {
+					return key
+				}
 			}
-			// Also handle bare public key output
+			// Bare age1 key on a line by itself
 			if strings.HasPrefix(line, "age1") && !strings.Contains(line, " ") {
 				return line
 			}
