@@ -60,10 +60,12 @@ func InitFleetRepo(outputDir, name string) error {
 	dirs := []string{
 		"clusters",
 		"infrastructure/base",
+		"infrastructure/controllers",
 		"infrastructure/overlays/cloud",
 		"infrastructure/overlays/bare-metal",
 		"infrastructure/overlays/local",
 		"apps/base",
+		"apps/disentangle",
 		"apps/overlays",
 		"secrets",
 	}

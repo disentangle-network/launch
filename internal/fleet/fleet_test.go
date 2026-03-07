@@ -336,10 +336,12 @@ func TestInitFleetRepo_AllDirectories(t *testing.T) {
 	expectedDirs := []string{
 		"clusters",
 		"infrastructure/base",
+		"infrastructure/controllers",
 		"infrastructure/overlays/cloud",
 		"infrastructure/overlays/bare-metal",
 		"infrastructure/overlays/local",
 		"apps/base",
+		"apps/disentangle",
 		"apps/overlays",
 		"secrets",
 	}
@@ -456,6 +458,71 @@ func TestAddCluster(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "path: ./infrastructure/controllers") {
 		t.Error("infrastructure.yaml should reference ./infrastructure/controllers")
+	}
+}
+
+func TestAddCluster_KustomizationPathsExistAfterScaffold(t *testing.T) {
+	tmpDir := t.TempDir()
+	fleetDir := filepath.Join(tmpDir, "fleet")
+
+	if err := InitFleetRepo(fleetDir, "invariant-test"); err != nil {
+		t.Fatalf("InitFleetRepo failed: %v", err)
+	}
+
+	cfg := ClusterConfig{
+		Name:         "path-check",
+		Arch:         "amd64",
+		Infra:        "cloud",
+		Nodes:        3,
+		Resources:    "small",
+		StorageClass: "local-path",
+		NebulaMode:   "node",
+		NebulaPrefix: "10.42.0",
+	}
+
+	if err := AddCluster(fleetDir, cfg); err != nil {
+		t.Fatalf("AddCluster failed: %v", err)
+	}
+
+	// Read infrastructure.yaml and apps.yaml, extract path: values,
+	// and verify those paths exist in the scaffold.
+	crFiles := []string{
+		filepath.Join(fleetDir, "clusters", cfg.Name, "infrastructure.yaml"),
+		filepath.Join(fleetDir, "clusters", cfg.Name, "apps.yaml"),
+	}
+
+	for _, crFile := range crFiles {
+		data, err := os.ReadFile(crFile)
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", filepath.Base(crFile), err)
+		}
+
+		var crPath string
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "path: ./") {
+				crPath = strings.TrimPrefix(trimmed, "path: ./")
+				break
+			}
+		}
+		if crPath == "" {
+			t.Fatalf("no 'path: ./' found in %s", filepath.Base(crFile))
+		}
+
+		absPath := filepath.Join(fleetDir, crPath)
+		info, err := os.Stat(absPath)
+		if os.IsNotExist(err) {
+			t.Errorf("Kustomization CR %s references path %q but it does not exist in the scaffold",
+				filepath.Base(crFile), crPath)
+			continue
+		}
+		if err != nil {
+			t.Fatalf("failed to stat %s: %v", crPath, err)
+		}
+		if !info.IsDir() {
+			t.Errorf("Kustomization CR %s references path %q but it is not a directory",
+				filepath.Base(crFile), crPath)
+		}
 	}
 }
 
