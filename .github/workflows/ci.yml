@@ -99,3 +99,25 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -ldflags "-s -w" -o launch-${{ matrix.goos }}-${{ matrix.goarch }} .
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: Build binary
+        run: go build -o launch .
+      - name: Verify help
+        run: ./launch --help
+      - name: Verify version
+        run: ./launch --version | head -1
+      - name: Smoke test preflight
+        run: ./launch preflight --dry-run 2>&1 || true
+      - name: Smoke test doctor (expect failure)
+        run: |
+          if ./launch doctor --fleet-dir /tmp/nonexistent 2>&1; then
+            echo "ERROR: doctor should exit non-zero when checks fail"
+            exit 1
+          fi
