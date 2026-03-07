@@ -12,6 +12,10 @@ import (
 	"github.com/disentangle-network/launch/internal/paths"
 )
 
+func mockToolsOK() DoctorCheck {
+	return DoctorCheck{Name: "Tools", Status: "ok", Detail: "all tools available (mock)"}
+}
+
 func TestDoctorNoConfig(t *testing.T) {
 	tmp := t.TempDir()
 	mock := exec.NewMockExecutor()
@@ -19,12 +23,13 @@ func TestDoctorNoConfig(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := Doctor(DoctorParams{
-		Exec:     mock,
-		Paths:    p,
-		Stdout:   &buf,
-		FleetDir: filepath.Join(tmp, "nonexistent-fleet"),
-		CfgFile:  filepath.Join(tmp, "nonexistent-config.yaml"),
-		Verbose:  false,
+		Exec:        mock,
+		Paths:       p,
+		Stdout:      &buf,
+		FleetDir:    filepath.Join(tmp, "nonexistent-fleet"),
+		CfgFile:     filepath.Join(tmp, "nonexistent-config.yaml"),
+		Verbose:     false,
+		ToolChecker: mockToolsOK,
 	})
 	if err == nil {
 		t.Fatal("Doctor() should return error when checks fail")
@@ -111,12 +116,13 @@ func TestDoctorWithFleet(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := Doctor(DoctorParams{
-		Exec:     mock,
-		Paths:    p,
-		Stdout:   &buf,
-		FleetDir: fleetDir,
-		CfgFile:  cfgPath,
-		Verbose:  false,
+		Exec:        mock,
+		Paths:       p,
+		Stdout:      &buf,
+		FleetDir:    fleetDir,
+		CfgFile:     cfgPath,
+		Verbose:     false,
+		ToolChecker: mockToolsOK,
 	})
 	if err != nil {
 		t.Fatalf("Doctor() returned unexpected error: %v", err)
@@ -157,12 +163,13 @@ func TestDoctorOutputFormat(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := Doctor(DoctorParams{
-		Exec:     mock,
-		Paths:    p,
-		Stdout:   &buf,
-		FleetDir: filepath.Join(tmp, "no-fleet"),
-		CfgFile:  filepath.Join(tmp, "no-config.yaml"),
-		Verbose:  false,
+		Exec:        mock,
+		Paths:       p,
+		Stdout:      &buf,
+		FleetDir:    filepath.Join(tmp, "no-fleet"),
+		CfgFile:     filepath.Join(tmp, "no-config.yaml"),
+		Verbose:     false,
+		ToolChecker: mockToolsOK,
 	})
 	if err == nil {
 		t.Fatal("Doctor() should return error when checks fail")
@@ -239,12 +246,13 @@ func TestDoctorWarningsOnly(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := Doctor(DoctorParams{
-		Exec:     mock,
-		Paths:    p,
-		Stdout:   &buf,
-		FleetDir: fleetDir,
-		CfgFile:  cfgPath,
-		Verbose:  false,
+		Exec:        mock,
+		Paths:       p,
+		Stdout:      &buf,
+		FleetDir:    fleetDir,
+		CfgFile:     cfgPath,
+		Verbose:     false,
+		ToolChecker: mockToolsOK,
 	})
 
 	// Warnings only -- Doctor should return nil

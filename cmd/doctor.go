@@ -31,12 +31,13 @@ func init() {
 
 // DoctorParams holds dependencies for the doctor command.
 type DoctorParams struct {
-	Exec     exec.Executor
-	Paths    *paths.Resolver
-	Stdout   io.Writer
-	FleetDir string
-	CfgFile  string
-	Verbose  bool
+	Exec        exec.Executor
+	Paths       *paths.Resolver
+	Stdout      io.Writer
+	FleetDir    string
+	CfgFile     string
+	Verbose     bool
+	ToolChecker func() DoctorCheck // optional; nil = use checkTools()
 }
 
 // DoctorCheck holds the result of a single diagnostic check.
@@ -58,7 +59,11 @@ func Doctor(p DoctorParams) error {
 	checks = append(checks, checkConfig(p))
 
 	// 2. Required tools
-	checks = append(checks, checkTools())
+	if p.ToolChecker != nil {
+		checks = append(checks, p.ToolChecker())
+	} else {
+		checks = append(checks, checkTools())
+	}
 
 	// 3. Credentials
 	checks = append(checks, checkCredentials(p))
