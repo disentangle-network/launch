@@ -2,7 +2,7 @@ name: Integration Tests
 
 on:
   schedule:
-    - cron: "0 6 * * *"  # Nightly at 6 AM UTC
+    - cron: "0 6 * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [loom-release]
@@ -18,7 +18,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+      - name: Install Kind
+        run: |
+          go install sigs.k8s.io/kind@v0.27.0
+          kind version
+      - name: Create Kind cluster
+        run: |
+          kind create cluster --name launch-integration --wait 60s
+          kubectl cluster-info --context kind-launch-integration
+      - name: Build launch binary
+        run: go build -o launch-test-binary .
       - name: Run integration tests
         run: go test -v -tags integration ./integration/...
         env:
           LAUNCH_INTEGRATION_LIVE: ""
+          LAUNCH_TEST_BINARY: ${{ github.workspace }}/launch-test-binary
+          LAUNCH_KIND_CONTEXT: kind-launch-integration
+      - name: Delete Kind cluster
+        if: always()
+        run: kind delete cluster --name launch-integration
