@@ -56,9 +56,11 @@ type FleetInitParams struct {
 	Exec    exec.Executor
 	Paths   *paths.Resolver
 	Stdout  io.Writer
-	Dir     string // flag override for output directory
-	Remote  string // explicit private remote URL
-	CfgFile string // config file path
+	Dir     string         // flag override for output directory
+	Remote  string         // explicit private remote URL
+	CfgFile string         // config file path
+	DryRun  bool           // show commands without executing
+	Config  *config.Config // pre-loaded config (nil loads from CfgFile)
 }
 
 // FleetInit clones the fleet template and sets up the private repo.
@@ -67,6 +69,24 @@ func FleetInit(p FleetInitParams) error {
 
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return fmt.Errorf("fleet-deploy already exists at %s", dir)
+	}
+
+	if p.DryRun {
+		fmt.Fprintf(p.Stdout, "[dry-run] git clone https://github.com/disentangle-network/fleet.git %s\n", dir)
+		fmt.Fprintf(p.Stdout, "[dry-run] git remote remove origin\n")
+		fmt.Fprintf(p.Stdout, "[dry-run] git remote add template https://github.com/disentangle-network/fleet.git\n")
+		if p.Remote != "" {
+			fmt.Fprintf(p.Stdout, "[dry-run] git remote add origin %s\n", p.Remote)
+		} else {
+			owner := fleetInitOwner(p)
+			if owner != "" {
+				fmt.Fprintf(p.Stdout, "[dry-run] gh repo create %s/fleet-deploy --private --source %s --push\n", owner, dir)
+			} else {
+				fmt.Fprintf(p.Stdout, "[dry-run] Would detect owner via gh api user\n")
+			}
+		}
+		fmt.Fprintf(p.Stdout, "[dry-run] Would save fleet_dir=%s to config\n", dir)
+		return nil
 	}
 
 	fmt.Fprintln(p.Stdout, "Cloning fleet template...")
@@ -84,13 +104,11 @@ func FleetInit(p FleetInitParams) error {
 		fmt.Fprintf(p.Stdout, "Setting private remote: %s\n", p.Remote)
 		_, _ = p.Exec.Run("git", "remote", "add", "origin", p.Remote)
 	} else {
-		// Detect the active gh user -- the owner must match the authenticated account
-		ghUser, err := p.Exec.RunSilent("gh", "api", "user", "--jq", ".login")
-		if err != nil || strings.TrimSpace(ghUser.Stdout) == "" {
-			fmt.Fprintf(p.Stdout, "  Could not detect gh user — set remote manually:\n")
+		owner := fleetInitOwner(p)
+		if owner == "" {
+			fmt.Fprintf(p.Stdout, "  Could not detect owner — set remote manually:\n")
 			fmt.Fprintf(p.Stdout, "  cd %s && git remote add origin <url> && git push -u origin main\n", dir)
 		} else {
-			owner := strings.TrimSpace(ghUser.Stdout)
 			fmt.Fprintf(p.Stdout, "Creating private repo: %s/fleet-deploy\n", owner)
 			_, err := p.Exec.Run("gh", "repo", "create", fmt.Sprintf("%s/fleet-deploy", owner),
 				"--private", "--source", dir, "--push")
@@ -101,7 +119,10 @@ func FleetInit(p FleetInitParams) error {
 		}
 	}
 
-	cfg, _ := config.Load(p.CfgFile)
+	cfg := p.Config
+	if cfg == nil {
+		cfg, _ = config.Load(p.CfgFile)
+	}
 	if cfg != nil {
 		cfg.FleetDir = dir
 		cfgPath, _ := config.DefaultConfigPath()
@@ -119,6 +140,22 @@ func FleetInit(p FleetInitParams) error {
 	})
 
 	return nil
+}
+
+// fleetInitOwner determines the repo owner: config.github_org first, then gh api user fallback.
+func fleetInitOwner(p FleetInitParams) string {
+	cfg := p.Config
+	if cfg == nil {
+		cfg, _ = config.Load(p.CfgFile)
+	}
+	if cfg != nil && cfg.GitHubOrg != "" {
+		return cfg.GitHubOrg
+	}
+	ghUser, err := p.Exec.RunSilent("gh", "api", "user", "--jq", ".login")
+	if err != nil || strings.TrimSpace(ghUser.Stdout) == "" {
+		return ""
+	}
+	return strings.TrimSpace(ghUser.Stdout)
 }
 
 // FleetStatusParams holds all dependencies for FleetStatus.
@@ -180,6 +217,8 @@ func runFleetInit(cmd *cobra.Command, args []string) error {
 		Dir:     fleetOutputDir,
 		Remote:  fleetPrivate,
 		CfgFile: cfgFile,
+		DryRun:  dryRun,
+		Config:  cfg,
 	})
 }
 
