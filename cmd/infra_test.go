@@ -738,3 +738,235 @@ func TestInfraDestroyFails(t *testing.T) {
 		t.Fatal("expected error for destroy failure, got nil")
 	}
 }
+
+// --------------------------------------------------------------------------
+// InfraDiscover
+// --------------------------------------------------------------------------
+
+func newTestDiscoverParams(t *testing.T) (InfraDiscoverParams, *exec.MockExecutor, string) {
+	t.Helper()
+
+	tmp := t.TempDir()
+	envDir := filepath.Join(tmp, "environments", "dev")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("creating env dir: %v", err)
+	}
+
+	mock := exec.NewMockExecutor()
+	cfg := &config.Config{}
+	pr := paths.NewWithHome(tmp, cfg)
+
+	var buf bytes.Buffer
+	p := InfraDiscoverParams{
+		Exec:   mock,
+		Paths:  pr,
+		Stdout: &buf,
+		Env:    "dev",
+		Dir:    tmp,
+	}
+	return p, mock, tmp
+}
+
+const discoverJSON = `{
+  "compartment_id": "ocid1.tenancy.oc1..test",
+  "tenancy": {
+    "id": "ocid1.tenancy.oc1..test",
+    "name": "test-tenancy",
+    "home_region": "us-phoenix-1"
+  },
+  "availability_domains": [
+    {"name": "AD-1"},
+    {"name": "AD-2"}
+  ],
+  "shapes": [],
+  "images": [],
+  "vcns": [],
+  "block_volumes": [],
+  "limits": []
+}`
+
+func TestInfraDiscover(t *testing.T) {
+	p, mock, tmp := newTestDiscoverParams(t)
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", discoverJSON, nil)
+
+	if err := InfraDiscover(p); err != nil {
+		t.Fatalf("InfraDiscover: %v", err)
+	}
+
+	mock.AssertCalled(t, "oci-tf-bootstrap --json --always-free --oke")
+
+	// Verify terraform.tfvars was written
+	tfvarsPath := filepath.Join(tmp, "environments", "dev", "terraform.tfvars")
+	data, err := os.ReadFile(tfvarsPath)
+	if err != nil {
+		t.Fatalf("failed to read terraform.tfvars: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `tenancy_ocid   = "ocid1.tenancy.oc1..test"`) {
+		t.Error("terraform.tfvars should contain tenancy_ocid")
+	}
+	if !strings.Contains(content, `region         = "us-phoenix-1"`) {
+		t.Error("terraform.tfvars should contain region")
+	}
+	if !strings.Contains(content, `environment = "dev"`) {
+		t.Error("terraform.tfvars should contain environment")
+	}
+}
+
+func TestInfraDiscoverWithProfile(t *testing.T) {
+	p, mock, _ := newTestDiscoverParams(t)
+	p.Profile = "PROD"
+	p.Region = "us-ashburn-1"
+	p.Compartment = "ocid1.compartment.oc1..custom"
+	mock.ExpectRun(
+		"oci-tf-bootstrap --json --always-free --oke --profile PROD --region us-ashburn-1 --compartment ocid1.compartment.oc1..custom",
+		discoverJSON, nil)
+
+	if err := InfraDiscover(p); err != nil {
+		t.Fatalf("InfraDiscover: %v", err)
+	}
+
+	// Region override should be used in tfvars
+	tfvarsPath := filepath.Join(p.Dir, "environments", "dev", "terraform.tfvars")
+	data, err := os.ReadFile(tfvarsPath)
+	if err != nil {
+		t.Fatalf("failed to read terraform.tfvars: %v", err)
+	}
+	if !strings.Contains(string(data), `region         = "us-ashburn-1"`) {
+		t.Error("terraform.tfvars should use overridden region")
+	}
+}
+
+func TestInfraDiscoverDryRun(t *testing.T) {
+	p, _, tmp := newTestDiscoverParams(t)
+	p.DryRun = true
+
+	if err := InfraDiscover(p); err != nil {
+		t.Fatalf("InfraDiscover dry-run: %v", err)
+	}
+
+	// Verify no terraform.tfvars was written
+	tfvarsPath := filepath.Join(tmp, "environments", "dev", "terraform.tfvars")
+	if _, err := os.Stat(tfvarsPath); !os.IsNotExist(err) {
+		t.Error("dry-run should not write terraform.tfvars")
+	}
+}
+
+func TestInfraDiscoverBootstrapFails(t *testing.T) {
+	p, mock, _ := newTestDiscoverParams(t)
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", "",
+		fmt.Errorf("oci-tf-bootstrap: command not found"))
+
+	err := InfraDiscover(p)
+	if err == nil {
+		t.Fatal("expected error when oci-tf-bootstrap fails")
+	}
+	if !strings.Contains(err.Error(), "oci-tf-bootstrap failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestInfraDiscoverBadJSON(t *testing.T) {
+	p, mock, _ := newTestDiscoverParams(t)
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", "not json", nil)
+
+	err := InfraDiscover(p)
+	if err == nil {
+		t.Fatal("expected error for bad JSON")
+	}
+	if !strings.Contains(err.Error(), "parsing oci-tf-bootstrap output") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestInfraDiscoverNoInfraDir(t *testing.T) {
+	mock := exec.NewMockExecutor()
+	pr := paths.NewWithHome("/nonexistent", nil)
+	var buf bytes.Buffer
+
+	err := InfraDiscover(InfraDiscoverParams{
+		Exec:   mock,
+		Paths:  pr,
+		Stdout: &buf,
+		Env:    "dev",
+	})
+	if err == nil {
+		t.Fatal("expected error when infra dir not found")
+	}
+	if !strings.Contains(err.Error(), "could not find k8s-oci-foundation") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestInfraDiscoverCreatesEnvDir(t *testing.T) {
+	tmp := t.TempDir()
+	// Don't pre-create environments/staging -- discover should create it
+	mock := exec.NewMockExecutor()
+	cfg := &config.Config{}
+	pr := paths.NewWithHome(tmp, cfg)
+	var buf bytes.Buffer
+
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", discoverJSON, nil)
+
+	err := InfraDiscover(InfraDiscoverParams{
+		Exec:   mock,
+		Paths:  pr,
+		Stdout: &buf,
+		Env:    "staging",
+		Dir:    tmp,
+	})
+	if err != nil {
+		t.Fatalf("InfraDiscover: %v", err)
+	}
+
+	// Verify environments/staging was created with terraform.tfvars
+	tfvarsPath := filepath.Join(tmp, "environments", "staging", "terraform.tfvars")
+	if _, err := os.Stat(tfvarsPath); os.IsNotExist(err) {
+		t.Error("discover should create env dir and terraform.tfvars")
+	}
+}
+
+func TestInfraDiscoverWithConfigValues(t *testing.T) {
+	tmp := t.TempDir()
+	envDir := filepath.Join(tmp, "environments", "dev")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a launch config with Cloudflare values
+	cfgPath := filepath.Join(tmp, "launch-config.yaml")
+	cfgContent := "domain: example.com\ncloudflare_account_id: cf-account-123\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := exec.NewMockExecutor()
+	pr := paths.NewWithHome(tmp, nil)
+	var buf bytes.Buffer
+
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", discoverJSON, nil)
+
+	err := InfraDiscover(InfraDiscoverParams{
+		Exec:    mock,
+		Paths:   pr,
+		Stdout:  &buf,
+		Env:     "dev",
+		Dir:     tmp,
+		CfgFile: cfgPath,
+	})
+	if err != nil {
+		t.Fatalf("InfraDiscover: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(envDir, "terraform.tfvars"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `cloudflare_domain      = "example.com"`) {
+		t.Error("terraform.tfvars should contain domain from launch config")
+	}
+	if !strings.Contains(content, `cloudflare_account_id  = "cf-account-123"`) {
+		t.Error("terraform.tfvars should contain cloudflare account ID from launch config")
+	}
+}

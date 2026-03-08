@@ -62,6 +62,10 @@ func resetRootCmd() {
 
 	statusFleetDir = ""
 
+	discoverProfile = ""
+	discoverConfigFile = ""
+	discoverRegion = ""
+
 	doctorFleetDir = ""
 
 	// Reset cobra flag Changed state so MarkFlagRequired checks work correctly.
@@ -546,6 +550,24 @@ func TestRunInfraKubeconfigViaCobra(t *testing.T) {
 	// Adapter entered; tofu output -raw cluster_id will fail.
 	if err != nil {
 		t.Logf("infra kubeconfig --dry-run error (acceptable): %v", err)
+	}
+}
+
+func TestRunInfraDiscoverViaCobra(t *testing.T) {
+	tmp := t.TempDir()
+	envDir := filepath.Join(tmp, "environments", "dev")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := execRootCmd([]string{
+		"infra", "discover",
+		"--dry-run",
+		"--dir", tmp,
+		"--env", "dev",
+	})
+	if err != nil {
+		t.Logf("infra discover --dry-run error (acceptable): %v", err)
 	}
 }
 
