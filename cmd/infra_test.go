@@ -868,13 +868,47 @@ func TestInfraDiscoverBootstrapFails(t *testing.T) {
 
 func TestInfraDiscoverBadJSON(t *testing.T) {
 	p, mock, _ := newTestDiscoverParams(t)
-	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", "not json", nil)
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", "{not valid json", nil)
 
 	err := InfraDiscover(p)
 	if err == nil {
 		t.Fatal("expected error for bad JSON")
 	}
 	if !strings.Contains(err.Error(), "parsing oci-tf-bootstrap output") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestInfraDiscoverHeaderBeforeJSON(t *testing.T) {
+	p, mock, _ := newTestDiscoverParams(t)
+	// oci-tf-bootstrap prints header/progress info before the JSON object
+	headerOutput := "oci-tf-bootstrap\n  Profile: DEFAULT\n  Config: ~/.oci/config\n  Region: us-phoenix-1\n" + discoverJSON
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", headerOutput, nil)
+
+	if err := InfraDiscover(p); err != nil {
+		t.Fatalf("InfraDiscover with header: %v", err)
+	}
+
+	// Should still produce valid tfvars
+	tfvarsPath := filepath.Join(p.Dir, "environments", "dev", "terraform.tfvars")
+	data, err := os.ReadFile(tfvarsPath)
+	if err != nil {
+		t.Fatalf("failed to read terraform.tfvars: %v", err)
+	}
+	if !strings.Contains(string(data), `region         = "us-phoenix-1"`) {
+		t.Error("terraform.tfvars should contain region from JSON, not header")
+	}
+}
+
+func TestInfraDiscoverNoJSON(t *testing.T) {
+	p, mock, _ := newTestDiscoverParams(t)
+	mock.ExpectRun("oci-tf-bootstrap --json --always-free --oke", "no json at all", nil)
+
+	err := InfraDiscover(p)
+	if err == nil {
+		t.Fatal("expected error when output has no JSON")
+	}
+	if !strings.Contains(err.Error(), "oci-tf-bootstrap produced no JSON output") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

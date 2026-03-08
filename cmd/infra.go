@@ -419,11 +419,25 @@ func InfraDiscover(p InfraDiscoverParams) error {
 	fmt.Fprintln(p.Stdout, "Discovering OCI resources...")
 	result, err := p.Exec.RunSilent("oci-tf-bootstrap", args...)
 	if err != nil {
+		fmt.Fprintf(p.Stdout, "Error: %v\n", err)
+		if result != nil && result.Stderr != "" {
+			fmt.Fprintf(p.Stdout, "stderr: %s\n", result.Stderr)
+		}
 		return fmt.Errorf("oci-tf-bootstrap failed: %w", err)
 	}
 
+	// oci-tf-bootstrap prints header/progress info before JSON on stdout.
+	// Find the JSON object start.
+	jsonStart := strings.Index(result.Stdout, "{")
+	if jsonStart < 0 {
+		fmt.Fprintln(p.Stdout, "Error: no JSON found in oci-tf-bootstrap output")
+		return fmt.Errorf("oci-tf-bootstrap produced no JSON output")
+	}
+	jsonOutput := result.Stdout[jsonStart:]
+
 	var discovery discoveryResult
-	if err := json.Unmarshal([]byte(result.Stdout), &discovery); err != nil {
+	if err := json.Unmarshal([]byte(jsonOutput), &discovery); err != nil {
+		fmt.Fprintf(p.Stdout, "Error parsing discovery output: %v\n", err)
 		return fmt.Errorf("parsing oci-tf-bootstrap output: %w", err)
 	}
 
