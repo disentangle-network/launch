@@ -241,7 +241,7 @@ func TestCommandRegistration(t *testing.T) {
 		"infra output":     {},
 		"infra kubeconfig": {},
 		"mesh init":        {"ca-output"},
-		"mesh add":         {"cluster", "lighthouse", "lighthouse-addr", "fleet-dir"},
+		"mesh add":         {"cluster", "is-lighthouse", "lighthouse", "fleet-dir"},
 		"status":           {"fleet-dir"},
 		"plugin list":      {},
 	}

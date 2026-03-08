@@ -52,7 +52,7 @@ func resetRootCmd() {
 	meshCAOutput = ""
 	meshCluster = ""
 	meshIsLighthouse = false
-	meshLighthouseAddr = ""
+	meshLighthouse = ""
 	meshFleetDir = "."
 
 	secretsCluster = ""

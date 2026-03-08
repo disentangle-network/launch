@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,25 @@ import (
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
 	"github.com/disentangle-network/launch/internal/paths"
+	"gopkg.in/yaml.v3"
 )
+
+// createStubCerts writes stub cert/key files so that writeCertSecret can read them.
+func createStubCerts(t *testing.T, secretsDir, cluster string, nodeCount int) {
+	t.Helper()
+	if err := os.MkdirAll(secretsDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= nodeCount; i++ {
+		certName := fmt.Sprintf("%s-node%d", cluster, i)
+		if err := os.WriteFile(filepath.Join(secretsDir, certName+".crt"), []byte(certName+"-crt-data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(secretsDir, certName+".key"), []byte(certName+"-key-data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestMeshInitNewCA(t *testing.T) {
 	home := t.TempDir()
@@ -150,7 +169,7 @@ func TestMeshAddPerNodeCerts(t *testing.T) {
 	if err := os.WriteFile(p.NebulaCAKey(), []byte("key"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(p.NebulaCACert(), []byte("cert"), 0600); err != nil {
+	if err := os.WriteFile(p.NebulaCACert(), []byte("ca-cert-data"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -171,6 +190,10 @@ data:
 		t.Fatal(err)
 	}
 
+	// Pre-create stub cert/key files (simulating nebula-cert sign output)
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	createStubCerts(t, secretsDir, cluster, 3)
+
 	var buf bytes.Buffer
 	err := MeshAdd(MeshAddParams{
 		Exec:     mock,
@@ -186,7 +209,6 @@ data:
 	// Verify 3 sign commands were issued
 	mock.AssertCallCount(t, 3)
 
-	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
 	caKey := p.NebulaCAKey()
 	caCrt := p.NebulaCACert()
 
@@ -202,6 +224,41 @@ data:
 	output := buf.String()
 	if !strings.Contains(output, "3 nodes") {
 		t.Errorf("output should mention '3 nodes', got: %s", output)
+	}
+
+	// Verify Secret manifest was written
+	secretManifest, err := os.ReadFile(filepath.Join(secretsDir, "nebula-certs.yaml"))
+	if err != nil {
+		t.Fatalf("nebula-certs.yaml not written: %v", err)
+	}
+	secretStr := string(secretManifest)
+	if !strings.Contains(secretStr, "kind: Secret") {
+		t.Error("secret manifest missing 'kind: Secret'")
+	}
+	if !strings.Contains(secretStr, base64.StdEncoding.EncodeToString([]byte("ca-cert-data"))) {
+		t.Error("secret manifest missing base64-encoded CA cert")
+	}
+	for i := 1; i <= 3; i++ {
+		certName := fmt.Sprintf("%s-node%d", cluster, i)
+		if !strings.Contains(secretStr, certName+".crt:") {
+			t.Errorf("secret manifest missing %s.crt entry", certName)
+		}
+		if !strings.Contains(secretStr, certName+".key:") {
+			t.Errorf("secret manifest missing %s.key entry", certName)
+		}
+	}
+
+	// Verify values overlay was written
+	valuesData, err := os.ReadFile(filepath.Join(clusterDir, "nebula-values.yaml"))
+	if err != nil {
+		t.Fatalf("nebula-values.yaml not written: %v", err)
+	}
+	valuesStr := string(valuesData)
+	if !strings.Contains(valuesStr, "enabled: true") {
+		t.Error("values overlay missing 'enabled: true'")
+	}
+	if !strings.Contains(valuesStr, "mode: node") {
+		t.Error("values overlay should have mode: node for non-lighthouse cluster")
 	}
 }
 
@@ -237,6 +294,10 @@ func TestMeshAddLighthouse(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Pre-create stub cert files
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	createStubCerts(t, secretsDir, cluster, 1)
+
 	var buf bytes.Buffer
 	err := MeshAdd(MeshAddParams{
 		Exec:         mock,
@@ -260,6 +321,15 @@ func TestMeshAddLighthouse(t *testing.T) {
 	cmdStr := call.CommandString()
 	if !strings.Contains(cmdStr, "disentangle,lighthouse") {
 		t.Errorf("lighthouse group not found in command: %s", cmdStr)
+	}
+
+	// Verify values overlay has mode: lighthouse
+	valuesData, err := os.ReadFile(filepath.Join(clusterDir, "nebula-values.yaml"))
+	if err != nil {
+		t.Fatalf("nebula-values.yaml not written: %v", err)
+	}
+	if !strings.Contains(string(valuesData), "mode: lighthouse") {
+		t.Errorf("values overlay should have mode: lighthouse, got: %s", string(valuesData))
 	}
 }
 
@@ -320,4 +390,299 @@ func TestMeshAddNoCA(t *testing.T) {
 	}
 
 	mock.AssertCallCount(t, 0)
+}
+
+func TestMeshAddLighthouseAddressWiring(t *testing.T) {
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "edge"
+
+	// Create CA key and cert
+	caDir := p.NebulaCADir()
+	if err := os.MkdirAll(caDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.NebulaCAKey(), []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.NebulaCACert(), []byte("cert"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create cluster-settings.yaml with 2 nodes
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clusterDir, "cluster-settings.yaml"),
+		[]byte("data:\n  nodes: \"2\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create stub cert files
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	createStubCerts(t, secretsDir, cluster, 2)
+
+	var buf bytes.Buffer
+	err := MeshAdd(MeshAddParams{
+		Exec:       mock,
+		Paths:      p,
+		Stdout:     &buf,
+		Cluster:    cluster,
+		FleetDir:   fleetDir,
+		Lighthouse: "10.42.0.1=lighthouse.disentangle.network:4242",
+	})
+	if err != nil {
+		t.Fatalf("MeshAdd returned error: %v", err)
+	}
+
+	// Verify values overlay has staticHostMap and relay
+	valuesData, err := os.ReadFile(filepath.Join(clusterDir, "nebula-values.yaml"))
+	if err != nil {
+		t.Fatalf("nebula-values.yaml not written: %v", err)
+	}
+
+	var values map[string]any
+	if err := yaml.Unmarshal(valuesData, &values); err != nil {
+		t.Fatalf("failed to parse values overlay: %v", err)
+	}
+
+	nebula, ok := values["nebula"].(map[string]any)
+	if !ok {
+		t.Fatal("values missing 'nebula' key")
+	}
+
+	// Check staticHostMap
+	hostMap, ok := nebula["staticHostMap"].(map[string]any)
+	if !ok {
+		t.Fatal("values missing 'staticHostMap'")
+	}
+	if hostMap["10.42.0.1"] != "lighthouse.disentangle.network:4242" {
+		t.Errorf("staticHostMap wrong, got: %v", hostMap)
+	}
+
+	// Check relay
+	relay, ok := nebula["relay"].(map[string]any)
+	if !ok {
+		t.Fatal("values missing 'relay'")
+	}
+	relays, ok := relay["relays"].([]any)
+	if !ok || len(relays) != 1 || relays[0] != "10.42.0.1" {
+		t.Errorf("relay.relays wrong, got: %v", relay["relays"])
+	}
+
+	// Check mode is node (not lighthouse)
+	if nebula["mode"] != "node" {
+		t.Errorf("expected mode: node, got: %v", nebula["mode"])
+	}
+}
+
+func TestMeshAddSecretManifestContents(t *testing.T) {
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "sec"
+
+	// Create CA key and cert
+	caDir := p.NebulaCADir()
+	if err := os.MkdirAll(caDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.NebulaCAKey(), []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	caCertContent := "my-ca-cert-content"
+	if err := os.WriteFile(p.NebulaCACert(), []byte(caCertContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create cluster-settings.yaml with 1 node
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clusterDir, "cluster-settings.yaml"),
+		[]byte("data:\n  nodes: \"1\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create stub cert files with known content
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	if err := os.MkdirAll(secretsDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	certContent := "node-cert-content"
+	keyContent := "node-key-content"
+	if err := os.WriteFile(filepath.Join(secretsDir, "sec-node1.crt"), []byte(certContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(secretsDir, "sec-node1.key"), []byte(keyContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := MeshAdd(MeshAddParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("MeshAdd returned error: %v", err)
+	}
+
+	secretData, err := os.ReadFile(filepath.Join(secretsDir, "nebula-certs.yaml"))
+	if err != nil {
+		t.Fatalf("nebula-certs.yaml not written: %v", err)
+	}
+	manifest := string(secretData)
+
+	// Verify base64 encoding
+	expectedCA := base64.StdEncoding.EncodeToString([]byte(caCertContent))
+	if !strings.Contains(manifest, "ca.crt: "+expectedCA) {
+		t.Errorf("manifest missing correct ca.crt base64, got:\n%s", manifest)
+	}
+
+	expectedCert := base64.StdEncoding.EncodeToString([]byte(certContent))
+	if !strings.Contains(manifest, "sec-node1.crt: "+expectedCert) {
+		t.Errorf("manifest missing correct node cert base64, got:\n%s", manifest)
+	}
+
+	expectedKey := base64.StdEncoding.EncodeToString([]byte(keyContent))
+	if !strings.Contains(manifest, "sec-node1.key: "+expectedKey) {
+		t.Errorf("manifest missing correct node key base64, got:\n%s", manifest)
+	}
+
+	// Verify namespace
+	if !strings.Contains(manifest, "namespace: disentangle") {
+		t.Error("manifest missing namespace: disentangle")
+	}
+}
+
+func TestParseLighthouse(t *testing.T) {
+	tests := []struct {
+		input    string
+		vpnIP    string
+		realAddr string
+		wantErr  bool
+	}{
+		{"10.42.0.1=lighthouse.example.com:4242", "10.42.0.1", "lighthouse.example.com:4242", false},
+		{"192.168.1.1=10.0.0.5:4242", "192.168.1.1", "10.0.0.5:4242", false},
+		{"badformat", "", "", true},
+		{"=missing-vpn:4242", "", "", true},
+		{"missing-addr=", "", "", true},
+		{"", "", "", true},
+	}
+
+	for _, tt := range tests {
+		vpnIP, realAddr, err := parseLighthouse(tt.input)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("parseLighthouse(%q): expected error, got nil", tt.input)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseLighthouse(%q): unexpected error: %v", tt.input, err)
+			continue
+		}
+		if vpnIP != tt.vpnIP {
+			t.Errorf("parseLighthouse(%q): vpnIP = %q, want %q", tt.input, vpnIP, tt.vpnIP)
+		}
+		if realAddr != tt.realAddr {
+			t.Errorf("parseLighthouse(%q): realAddr = %q, want %q", tt.input, realAddr, tt.realAddr)
+		}
+	}
+}
+
+func TestMeshAddInvalidLighthouseFormat(t *testing.T) {
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	// Create CA key
+	caDir := p.NebulaCADir()
+	if err := os.MkdirAll(caDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.NebulaCAKey(), []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err := MeshAdd(MeshAddParams{
+		Exec:       mock,
+		Paths:      p,
+		Stdout:     &buf,
+		Cluster:    "test",
+		FleetDir:   t.TempDir(),
+		Lighthouse: "invalid-format",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid lighthouse format")
+	}
+	if !strings.Contains(err.Error(), "invalid lighthouse format") {
+		t.Errorf("error should mention 'invalid lighthouse format', got: %v", err)
+	}
+
+	mock.AssertCallCount(t, 0)
+}
+
+func TestMeshAddOutputMentionsFiles(t *testing.T) {
+	home := t.TempDir()
+	mock := exec.NewMockExecutor()
+	p := paths.NewWithHome(home, nil)
+
+	fleetDir := t.TempDir()
+	cluster := "out"
+
+	// Create CA key and cert
+	caDir := p.NebulaCADir()
+	if err := os.MkdirAll(caDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.NebulaCAKey(), []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p.NebulaCACert(), []byte("cert"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	clusterDir := p.FleetClusterDir(fleetDir, cluster)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clusterDir, "cluster-settings.yaml"),
+		[]byte("data:\n  nodes: \"1\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	secretsDir := p.FleetSecretsDir(fleetDir, cluster)
+	createStubCerts(t, secretsDir, cluster, 1)
+
+	var buf bytes.Buffer
+	err := MeshAdd(MeshAddParams{
+		Exec:     mock,
+		Paths:    p,
+		Stdout:   &buf,
+		Cluster:  cluster,
+		FleetDir: fleetDir,
+	})
+	if err != nil {
+		t.Fatalf("MeshAdd returned error: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "nebula-certs.yaml") {
+		t.Errorf("output should mention nebula-certs.yaml, got: %s", output)
+	}
+	if !strings.Contains(output, "nebula-values.yaml") {
+		t.Errorf("output should mention nebula-values.yaml, got: %s", output)
+	}
 }

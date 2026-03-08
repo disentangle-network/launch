@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/disentangle-network/launch/internal/config"
 	"github.com/disentangle-network/launch/internal/exec"
@@ -32,19 +34,20 @@ The CA key is stored locally and must never be committed to git.`,
 }
 
 var (
-	meshCluster        string
-	meshIsLighthouse   bool
-	meshLighthouseAddr string
-	meshFleetDir       string
+	meshCluster      string
+	meshIsLighthouse bool
+	meshLighthouse   string
+	meshFleetDir     string
 )
 
 var meshAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Generate nebula host certificates for a cluster",
-	Long: `Generate post-quantum host certificates for each node in a cluster
-and SOPS-encrypt them into the fleet repository's secrets directory.`,
+	Long: `Generate post-quantum host certificates for each node in a cluster,
+generate K8s Secret manifests and Helm values overlays, and wire lighthouse
+addresses into the nebula configuration.`,
 	Example: `  launch-disentangle mesh add --cluster edge-1
-  launch-disentangle mesh add --cluster edge-1 --lighthouse --lighthouse-addr 1.2.3.4:4242`,
+  launch-disentangle mesh add --cluster edge-1 --lighthouse 10.42.0.1=lighthouse.example.com:4242`,
 	RunE: runMeshAdd,
 }
 
@@ -56,8 +59,8 @@ func init() {
 	meshInitCmd.Flags().StringVar(&meshCAOutput, "ca-output", "", "Output directory for CA files (default: ~/.config/disentangle/nebula-ca/)")
 
 	meshAddCmd.Flags().StringVar(&meshCluster, "cluster", "", "Cluster name (required)")
-	meshAddCmd.Flags().BoolVar(&meshIsLighthouse, "lighthouse", false, "This cluster runs a lighthouse node")
-	meshAddCmd.Flags().StringVar(&meshLighthouseAddr, "lighthouse-addr", "", "Lighthouse address for non-lighthouse clusters (ip:port)")
+	meshAddCmd.Flags().BoolVar(&meshIsLighthouse, "is-lighthouse", false, "This cluster runs a lighthouse node")
+	meshAddCmd.Flags().StringVar(&meshLighthouse, "lighthouse", "", "Lighthouse VPN IP and real address (vpnIP=host:port)")
 	meshAddCmd.Flags().StringVar(&meshFleetDir, "fleet-dir", ".", "Path to fleet repository root")
 	_ = meshAddCmd.MarkFlagRequired("cluster")
 }
@@ -124,13 +127,29 @@ func MeshInit(p MeshInitParams) error {
 
 // MeshAddParams holds all dependencies for MeshAdd.
 type MeshAddParams struct {
-	Exec           exec.Executor
-	Paths          *paths.Resolver
-	Stdout         io.Writer
-	Cluster        string
-	FleetDir       string
-	IsLighthouse   bool
-	LighthouseAddr string
+	Exec         exec.Executor
+	Paths        *paths.Resolver
+	Stdout       io.Writer
+	Cluster      string
+	FleetDir     string
+	IsLighthouse bool
+	Lighthouse   string // format: "vpnIP=host:port"
+}
+
+// parseLighthouse splits "10.42.0.1=lighthouse.example.com:4242" into vpnIP and realAddr.
+func parseLighthouse(s string) (vpnIP, realAddr string, err error) {
+	parts := strings.SplitN(s, "=", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid lighthouse format %q (expected vpnIP=host:port)", s)
+	}
+	return parts[0], parts[1], nil
+}
+
+// meshCertFile tracks a generated cert/key pair for Secret manifest generation.
+type meshCertFile struct {
+	name string
+	key  string
+	crt  string
 }
 
 // clusterSettingsConfigMap represents the Kubernetes ConfigMap structure
@@ -142,13 +161,24 @@ type clusterSettingsConfigMap struct {
 	} `yaml:"data"`
 }
 
-// MeshAdd generates nebula host certificates for each node in a cluster.
+// MeshAdd generates nebula host certificates for each node in a cluster,
+// writes a K8s Secret manifest, and generates a Helm values overlay.
 func MeshAdd(p MeshAddParams) error {
 	caKeyPath := p.Paths.NebulaCAKey()
 	caCrtPath := p.Paths.NebulaCACert()
 
 	if _, err := os.Stat(caKeyPath); os.IsNotExist(err) {
 		return fmt.Errorf("no CA found at %s (run 'launch mesh init' first)", p.Paths.NebulaCADir())
+	}
+
+	// Parse lighthouse flag if provided
+	var lighthouseVPNIP, lighthouseRealAddr string
+	if p.Lighthouse != "" {
+		var err error
+		lighthouseVPNIP, lighthouseRealAddr, err = parseLighthouse(p.Lighthouse)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Read cluster settings to get node count and nebula prefix
@@ -196,6 +226,9 @@ func MeshAdd(p MeshAddParams) error {
 		groups = "disentangle,lighthouse"
 	}
 
+	// Track cert files for the K8s Secret manifest
+	var certs []meshCertFile
+
 	for i := 1; i <= nodeCount; i++ {
 		certName := fmt.Sprintf("%s-node%d", p.Cluster, i)
 		certKeyPath := filepath.Join(secretsDir, fmt.Sprintf("%s.key", certName))
@@ -214,15 +247,89 @@ func MeshAdd(p MeshAddParams) error {
 		if err != nil {
 			return fmt.Errorf("failed to generate host cert for %s: %w", certName, err)
 		}
+
+		certs = append(certs, meshCertFile{name: certName, key: certKeyPath, crt: certCrtPath})
+	}
+
+	// Generate K8s Secret manifest
+	if err := writeCertSecret(caCrtPath, certs, secretsDir); err != nil {
+		return fmt.Errorf("writing cert secret manifest: %w", err)
+	}
+
+	// Generate values overlay
+	mode := "node"
+	if p.IsLighthouse {
+		mode = "lighthouse"
+	}
+	if err := writeValuesOverlay(clusterDir, mode, lighthouseVPNIP, lighthouseRealAddr); err != nil {
+		return fmt.Errorf("writing values overlay: %w", err)
 	}
 
 	fmt.Fprintf(p.Stdout, "\nHost certificates generated in %s\n", secretsDir)
+	fmt.Fprintf(p.Stdout, "Secret manifest: %s\n", filepath.Join(secretsDir, "nebula-certs.yaml"))
+	fmt.Fprintf(p.Stdout, "Values overlay:  %s\n", filepath.Join(clusterDir, "nebula-values.yaml"))
 	hints.Fprint(p.Stdout, []hints.NextStep{
 		{Command: "bootstrap --cluster " + p.Cluster, Description: "Bootstrap FluxCD"},
 		{Command: "status", Description: "Check deployment health"},
 	})
 
 	return nil
+}
+
+// writeCertSecret writes a K8s Secret manifest containing the CA cert and
+// per-node certs/keys as base64-encoded data entries.
+func writeCertSecret(caCrtPath string, certs []meshCertFile, secretsDir string) error {
+	caCrtData, err := os.ReadFile(filepath.Clean(caCrtPath))
+	if err != nil {
+		return fmt.Errorf("reading CA cert: %w", err)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("apiVersion: v1\nkind: Secret\nmetadata:\n  name: nebula-certs\n  namespace: disentangle\ntype: Opaque\ndata:\n")
+	sb.WriteString(fmt.Sprintf("  ca.crt: %s\n", base64.StdEncoding.EncodeToString(caCrtData)))
+
+	for _, c := range certs {
+		crtData, err := os.ReadFile(filepath.Clean(c.crt))
+		if err != nil {
+			return fmt.Errorf("reading cert %s: %w", c.crt, err)
+		}
+		keyData, err := os.ReadFile(filepath.Clean(c.key))
+		if err != nil {
+			return fmt.Errorf("reading key %s: %w", c.key, err)
+		}
+		sb.WriteString(fmt.Sprintf("  %s.crt: %s\n", c.name, base64.StdEncoding.EncodeToString(crtData)))
+		sb.WriteString(fmt.Sprintf("  %s.key: %s\n", c.name, base64.StdEncoding.EncodeToString(keyData)))
+	}
+
+	return os.WriteFile(filepath.Join(secretsDir, "nebula-certs.yaml"), []byte(sb.String()), 0600)
+}
+
+// writeValuesOverlay writes a Helm values overlay for the nebula chart.
+func writeValuesOverlay(clusterDir, mode, lighthouseVPNIP, lighthouseRealAddr string) error {
+	values := map[string]any{
+		"nebula": map[string]any{
+			"enabled": true,
+			"mode":    mode,
+		},
+	}
+
+	nebulaMap := values["nebula"].(map[string]any)
+
+	if lighthouseVPNIP != "" && lighthouseRealAddr != "" {
+		nebulaMap["staticHostMap"] = map[string]string{
+			lighthouseVPNIP: lighthouseRealAddr,
+		}
+		nebulaMap["relay"] = map[string]any{
+			"relays": []string{lighthouseVPNIP},
+		}
+	}
+
+	out, err := yaml.Marshal(values)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filepath.Join(clusterDir, "nebula-values.yaml"), out, 0644)
 }
 
 func runMeshInit(cmd *cobra.Command, args []string) error {
@@ -251,12 +358,12 @@ func runMeshAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	return MeshAdd(MeshAddParams{
-		Exec:           runner,
-		Paths:          p,
-		Stdout:         os.Stdout,
-		Cluster:        meshCluster,
-		FleetDir:       meshFleetDir,
-		IsLighthouse:   meshIsLighthouse,
-		LighthouseAddr: meshLighthouseAddr,
+		Exec:         runner,
+		Paths:        p,
+		Stdout:       os.Stdout,
+		Cluster:      meshCluster,
+		FleetDir:     meshFleetDir,
+		IsLighthouse: meshIsLighthouse,
+		Lighthouse:   meshLighthouse,
 	})
 }
